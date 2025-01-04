@@ -102,37 +102,22 @@ app.use((err, req, res, next) => {
 
 // הגעלת השרת
 const startServer = async (retries = 3) => {
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 10000;
+  const HOST = process.env.HOST || '0.0.0.0';
   
   try {
     await new Promise((resolve, reject) => {
-      server.listen(PORT)
+      server.listen(PORT, HOST)
         .once('error', (err) => {
           if (err.code === 'EADDRINUSE') {
-            logger.warn(`Port ${PORT} is busy, trying to close existing connection...`);
-            if (process.env.NODE_ENV !== 'production') {
-              require('child_process').exec(`npx kill-port ${PORT}`, async (error) => {
-                if (error) {
-                  logger.error('Failed to kill port:', error);
-                  if (retries > 0) {
-                    logger.info(`Retrying... (${retries} attempts left)`);
-                    setTimeout(() => startServer(retries - 1), 1000);
-                  } else {
-                    reject(error);
-                  }
-                } else {
-                  setTimeout(() => startServer(retries), 1000);
-                }
-              });
-            } else {
-              reject(err);
-            }
+            logger.warn(`Port ${PORT} is busy`);
+            reject(err);
           } else {
             reject(err);
           }
         })
         .once('listening', () => {
-          logger.info(`Server running on port ${PORT}`);
+          logger.info(`Server running on http://${HOST}:${PORT}`);
           resolve();
         });
     });
