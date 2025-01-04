@@ -67,6 +67,21 @@ class WhatsAppService {
       return;
     }
 
+    for (const [existingSessionId, client] of this.clients.entries()) {
+      if (existingSessionId !== sessionId) {
+        try {
+          await client.destroy();
+          this.clients.delete(existingSessionId);
+          this.qrCodes.delete(existingSessionId);
+          this.isConnected.delete(existingSessionId);
+          this.isInitializing.delete(existingSessionId);
+          logger.info(`Cleaned up old session: ${existingSessionId}`);
+        } catch (error) {
+          logger.warn(`Error cleaning up old session ${existingSessionId}:`, error);
+        }
+      }
+    }
+
     try {
       this.isInitializing.set(sessionId, true);
       this.isConnected.set(sessionId, false);

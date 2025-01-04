@@ -29,6 +29,12 @@ router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
       });
     }
     
+    // אם יש כבר QR קוד זמין, נחזיר אותו מיד
+    if (whatsappService.qrCodes.has(sessionId)) {
+      logger.info(`Existing QR code found for session ${sessionId}, sending response`);
+      return res.json({ qr: whatsappService.getQR(sessionId) });
+    }
+    
     // אם WhatsApp לא מאותחל ולא בתהליך אתחול, נאתחל אותו
     if (!whatsappService.clients.has(sessionId) && !whatsappService.isInitializing.get(sessionId)) {
       logger.info(`WhatsApp client not initialized for session ${sessionId}, initializing...`);
@@ -37,8 +43,8 @@ router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
     
     // נחכה לקבלת ה-QR
     let attempts = 0;
-    const maxAttempts = 30; // הגדלנו את מספר הניסיונות
-    const waitTime = 1000; // שנייה אחת בין ניסיונות
+    const maxAttempts = 30;
+    const waitTime = 1000;
 
     while (!whatsappService.qrCodes.has(sessionId) && attempts < maxAttempts) {
       logger.info(`Waiting for QR code, attempt ${attempts + 1}/${maxAttempts}`);
