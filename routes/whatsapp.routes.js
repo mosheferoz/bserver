@@ -4,9 +4,10 @@ const whatsappService = require('../services/whatsapp.service');
 const { db, admin } = require('../database/firebase');
 const logger = require('../logger');
 const authMiddleware = require('../middleware/auth');
+const { statusQrLimiter, generalLimiter } = require('../middleware/rateLimiter');
 
-// נתיבים שלא דורשים אימות
-router.get('/qr/:sessionId', async (req, res) => {
+// נתיבים שלא דורשים אימות אבל דורשים Rate Limiting מיוחד
+router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
   try {
     const { sessionId } = req.params;
     
@@ -64,7 +65,7 @@ router.get('/qr/:sessionId', async (req, res) => {
   }
 });
 
-router.get('/status/:sessionId', (req, res) => {
+router.get('/status/:sessionId', statusQrLimiter, (req, res) => {
   try {
     const { sessionId } = req.params;
     
@@ -87,8 +88,9 @@ router.get('/status/:sessionId', (req, res) => {
   }
 });
 
-// נתיבים שדורשים אימות
+// נתיבים שדורשים אימות ו-Rate Limiting כללי
 router.use(authMiddleware);
+router.use(generalLimiter);
 
 router.post('/send', async (req, res) => {
   try {

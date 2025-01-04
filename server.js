@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const config = require('./config');
 const logger = require('./logger');
-const rateLimiter = require('./middleware/rateLimiter');
+const { generalLimiter } = require('./middleware/rateLimiter');
 const scraperRoutes = require('./routes/scraper.routes');
 const whatsappService = require('./services/whatsapp.service');
 
@@ -35,13 +35,12 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(helmet());
 app.use(compression());
-app.use(rateLimiter);
 
 // נתיבים
-app.use('/api/scraper', scraperRoutes);
+app.use('/api/scraper', generalLimiter, scraperRoutes);
 app.use('/api/whatsapp', require('./routes/whatsapp.routes'));
 
-// נתיב בדיקת בריאות
+// נתיב בדיקת בריאות - ללא Rate Limiting
 app.use('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
