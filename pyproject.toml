@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "crm-events-scraper"
+version = "0.1.0"
+description = "Web scraper for CRM Events"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+beautifulsoup4 = "^4.12.2"
+requests = "^2.31.0"
+selenium = "^4.15.2"
+webdriver-manager = "^4.0.1"
+python-dotenv = "^1.0.0"
+lxml = "^4.9.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,48 @@
+{
+  "name": "whatsapp-bulk-sender",
+  "version": "1.0.0",
+  "description": "WhatsApp Bulk Message Sender with Web Scraping",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "npx kill-port 3000 && nodemon --no-warnings server.js",
+    "lint": "eslint .",
+    "test": "jest",
+    "logs": "tail -f ./logs/app.log"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "body-parser": "^1.20.3",
+    "cheerio": "^1.0.0",
+    "compression": "^1.7.5",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.1.0",
+    "dotenv": "^10.0.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^5.5.1",
+    "firebase-admin": "^10.3.0",
+    "fs-extra": "^10.1.0",
+    "helmet": "^4.6.0",
+    "jsonwebtoken": "^8.5.1",
+    "moment": "^2.29.1",
+    "multer": "^1.4.4",
+    "puppeteer": "^23.11.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "rimraf": "^6.0.1",
+    "socket.io": "^4.8.1",
+    "uuid": "^8.3.2",
+    "validator": "^13.12.0",
+    "whatsapp-web.js": "^1.26.0",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "jest": "^27.0.6",
+    "nodemon": "^2.0.15",
+    "supertest": "^6.1.6"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
