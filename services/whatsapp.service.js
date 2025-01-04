@@ -52,8 +52,18 @@ class WhatsAppService {
   }
 
   async initialize(sessionId) {
+    if (!sessionId) {
+      logger.error('Session ID is required for initialization');
+      throw new Error('Session ID is required');
+    }
+
     if (this.isInitializing.get(sessionId)) {
       logger.info(`WhatsApp client is already initializing for session ${sessionId}`);
+      return;
+    }
+
+    if (this.isConnected.get(sessionId)) {
+      logger.info(`WhatsApp client is already connected for session ${sessionId}`);
       return;
     }
 
@@ -103,9 +113,9 @@ class WhatsAppService {
           logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
           const qrCode = await qrcode.toDataURL(qr);
           this.qrCodes.set(sessionId, qrCode);
-          logger.info('QR code converted to data URL');
+          logger.info(`QR code converted to data URL for session ${sessionId}`);
         } catch (error) {
-          logger.error('Error generating QR code:', error);
+          logger.error(`Error generating QR code for session ${sessionId}:`, error);
           this.qrCodes.delete(sessionId);
         }
       });
@@ -122,6 +132,7 @@ class WhatsAppService {
         logger.error(`WhatsApp authentication failed for session ${sessionId}:`, err);
         
         await this.cleanupAuthFolder(sessionId);
+        this.isInitializing.delete(sessionId);
         setTimeout(() => this.initialize(sessionId), 5000);
       });
 
@@ -138,6 +149,7 @@ class WhatsAppService {
           }
           
           await this.cleanupAuthFolder(sessionId);
+          this.isInitializing.delete(sessionId);
           
           setTimeout(() => {
             if (!this.isInitializing.get(sessionId)) {
@@ -145,7 +157,7 @@ class WhatsAppService {
             }
           }, 5000);
         } catch (error) {
-          logger.error('Error handling disconnection:', error);
+          logger.error(`Error handling disconnection for session ${sessionId}:`, error);
         }
       });
 
@@ -161,14 +173,13 @@ class WhatsAppService {
         try {
           await this.clients.get(sessionId).destroy();
         } catch (destroyError) {
-          logger.error('Error destroying client:', destroyError);
+          logger.error(`Error destroying client for session ${sessionId}:`, destroyError);
         }
         this.clients.delete(sessionId);
       }
       
-      setTimeout(() => this.initialize(sessionId), 10000);
-    } finally {
       this.isInitializing.delete(sessionId);
+      throw error;
     }
   }
 

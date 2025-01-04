@@ -20,17 +20,28 @@ router.get('/qr/:sessionId', async (req, res) => {
 
     logger.info(`QR code request received for session ${sessionId}`);
     
-    // אם WhatsApp לא מחובר, נאתחל אותו
-    if (!whatsappService.clients.has(sessionId)) {
+    // בדיקה אם הלקוח כבר מחובר
+    if (whatsappService.isConnected.get(sessionId)) {
+      return res.status(400).json({
+        error: 'Already connected',
+        details: 'WhatsApp client is already connected for this session'
+      });
+    }
+    
+    // אם WhatsApp לא מאותחל ולא בתהליך אתחול, נאתחל אותו
+    if (!whatsappService.clients.has(sessionId) && !whatsappService.isInitializing.get(sessionId)) {
       logger.info(`WhatsApp client not initialized for session ${sessionId}, initializing...`);
       await whatsappService.initialize(sessionId);
     }
     
-    // נחכה קצת לקבלת ה-QR
+    // נחכה לקבלת ה-QR
     let attempts = 0;
-    while (!whatsappService.qrCodes.has(sessionId) && attempts < 10) {
-      logger.info(`Waiting for QR code, attempt ${attempts + 1}/10`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    const maxAttempts = 30; // הגדלנו את מספר הניסיונות
+    const waitTime = 1000; // שנייה אחת בין ניסיונות
+
+    while (!whatsappService.qrCodes.has(sessionId) && attempts < maxAttempts) {
+      logger.info(`Waiting for QR code, attempt ${attempts + 1}/${maxAttempts}`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
       attempts++;
     }
 
@@ -38,7 +49,7 @@ router.get('/qr/:sessionId', async (req, res) => {
       logger.warn(`QR code not generated after waiting for session ${sessionId}`);
       return res.status(404).json({ 
         error: 'QR not available',
-        details: 'QR code generation timeout'
+        details: 'QR code generation timeout. Please try again.'
       });
     }
 
