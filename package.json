@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "npx kill-port 3000 && nodemon --no-warnings server.js",
+    "dev": "npx kill-port 10000 && nodemon --no-warnings server.js",
     "lint": "eslint .",
     "test": "jest",
     "logs": "tail -f ./logs/app.log"

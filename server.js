@@ -92,7 +92,8 @@ app.use((err, req, res, next) => {
 // אתחול WhatsApp והפעלת השרת
 (async () => {
   try {
-    await whatsappService.initialize();
+    const defaultSessionId = process.env.WHATSAPP_CLIENT_ID || 'default-session';
+    await whatsappService.initialize(defaultSessionId);
     await startServer();
   } catch (err) {
     logger.error('Failed to initialize:', err);
