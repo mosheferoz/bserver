@@ -88,17 +88,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// אתחול WhatsApp והפעלת השרת
-(async () => {
-  try {
-    await startServer();
-  } catch (err) {
-    logger.error('Failed to initialize:', err);
-    process.exit(1);
-  }
-})();
-
-// הגעלת השרת
+// הגדרת פונקציית הפעלת השרת
 const startServer = async (retries = 3) => {
   const PORT = process.env.PORT || 10000;
   const HOST = process.env.HOST || '0.0.0.0';
@@ -124,3 +114,13 @@ const startServer = async (retries = 3) => {
     process.exit(1);
   }
 };
+
+// הפעלת השרת
+(async () => {
+  try {
+    await startServer();
+  } catch (err) {
+    logger.error('Failed to initialize:', err);
+    process.exit(1);
+  }
+})();
