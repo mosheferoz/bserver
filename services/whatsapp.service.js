@@ -52,34 +52,9 @@ class WhatsAppService {
   }
 
   async initialize(sessionId) {
-    if (!sessionId) {
-      logger.error('Session ID is required for initialization');
-      throw new Error('Session ID is required');
-    }
-
     if (this.isInitializing.get(sessionId)) {
       logger.info(`WhatsApp client is already initializing for session ${sessionId}`);
       return;
-    }
-
-    if (this.isConnected.get(sessionId)) {
-      logger.info(`WhatsApp client is already connected for session ${sessionId}`);
-      return;
-    }
-
-    for (const [existingSessionId, client] of this.clients.entries()) {
-      if (existingSessionId !== sessionId) {
-        try {
-          await client.destroy();
-          this.clients.delete(existingSessionId);
-          this.qrCodes.delete(existingSessionId);
-          this.isConnected.delete(existingSessionId);
-          this.isInitializing.delete(existingSessionId);
-          logger.info(`Cleaned up old session: ${existingSessionId}`);
-        } catch (error) {
-          logger.warn(`Error cleaning up old session ${existingSessionId}:`, error);
-        }
-      }
     }
 
     try {
@@ -128,9 +103,9 @@ class WhatsAppService {
           logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
           const qrCode = await qrcode.toDataURL(qr);
           this.qrCodes.set(sessionId, qrCode);
-          logger.info(`QR code converted to data URL for session ${sessionId}`);
+          logger.info('QR code converted to data URL');
         } catch (error) {
-          logger.error(`Error generating QR code for session ${sessionId}:`, error);
+          logger.error('Error generating QR code:', error);
           this.qrCodes.delete(sessionId);
         }
       });
@@ -147,7 +122,6 @@ class WhatsAppService {
         logger.error(`WhatsApp authentication failed for session ${sessionId}:`, err);
         
         await this.cleanupAuthFolder(sessionId);
-        this.isInitializing.delete(sessionId);
         setTimeout(() => this.initialize(sessionId), 5000);
       });
 
@@ -164,7 +138,6 @@ class WhatsAppService {
           }
           
           await this.cleanupAuthFolder(sessionId);
-          this.isInitializing.delete(sessionId);
           
           setTimeout(() => {
             if (!this.isInitializing.get(sessionId)) {
@@ -172,7 +145,7 @@ class WhatsAppService {
             }
           }, 5000);
         } catch (error) {
-          logger.error(`Error handling disconnection for session ${sessionId}:`, error);
+          logger.error('Error handling disconnection:', error);
         }
       });
 
@@ -188,13 +161,14 @@ class WhatsAppService {
         try {
           await this.clients.get(sessionId).destroy();
         } catch (destroyError) {
-          logger.error(`Error destroying client for session ${sessionId}:`, destroyError);
+          logger.error('Error destroying client:', destroyError);
         }
         this.clients.delete(sessionId);
       }
       
+      setTimeout(() => this.initialize(sessionId), 10000);
+    } finally {
       this.isInitializing.delete(sessionId);
-      throw error;
     }
   }
 

@@ -4,10 +4,9 @@ const whatsappService = require('../services/whatsapp.service');
 const { db, admin } = require('../database/firebase');
 const logger = require('../logger');
 const authMiddleware = require('../middleware/auth');
-const { statusQrLimiter, generalLimiter } = require('../middleware/rateLimiter');
 
-// נתיבים שלא דורשים אימות אבל דורשים Rate Limiting מיוחד
-router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
+// נתיבים שלא דורשים אימות
+router.get('/qr/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
     
@@ -21,34 +20,17 @@ router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
 
     logger.info(`QR code request received for session ${sessionId}`);
     
-    // בדיקה אם הלקוח כבר מחובר
-    if (whatsappService.isConnected.get(sessionId)) {
-      return res.status(400).json({
-        error: 'Already connected',
-        details: 'WhatsApp client is already connected for this session'
-      });
-    }
-    
-    // אם יש כבר QR קוד זמין, נחזיר אותו מיד
-    if (whatsappService.qrCodes.has(sessionId)) {
-      logger.info(`Existing QR code found for session ${sessionId}, sending response`);
-      return res.json({ qr: whatsappService.getQR(sessionId) });
-    }
-    
-    // אם WhatsApp לא מאותחל ולא בתהליך אתחול, נאתחל אותו
-    if (!whatsappService.clients.has(sessionId) && !whatsappService.isInitializing.get(sessionId)) {
+    // אם WhatsApp לא מחובר, נאתחל אותו
+    if (!whatsappService.clients.has(sessionId)) {
       logger.info(`WhatsApp client not initialized for session ${sessionId}, initializing...`);
       await whatsappService.initialize(sessionId);
     }
     
-    // נחכה לקבלת ה-QR
+    // נחכה קצת לקבלת ה-QR
     let attempts = 0;
-    const maxAttempts = 30;
-    const waitTime = 1000;
-
-    while (!whatsappService.qrCodes.has(sessionId) && attempts < maxAttempts) {
-      logger.info(`Waiting for QR code, attempt ${attempts + 1}/${maxAttempts}`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+    while (!whatsappService.qrCodes.has(sessionId) && attempts < 10) {
+      logger.info(`Waiting for QR code, attempt ${attempts + 1}/10`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
       attempts++;
     }
 
@@ -56,7 +38,7 @@ router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
       logger.warn(`QR code not generated after waiting for session ${sessionId}`);
       return res.status(404).json({ 
         error: 'QR not available',
-        details: 'QR code generation timeout. Please try again.'
+        details: 'QR code generation timeout'
       });
     }
 
@@ -71,7 +53,7 @@ router.get('/qr/:sessionId', statusQrLimiter, async (req, res) => {
   }
 });
 
-router.get('/status/:sessionId', statusQrLimiter, (req, res) => {
+router.get('/status/:sessionId', (req, res) => {
   try {
     const { sessionId } = req.params;
     
@@ -94,9 +76,8 @@ router.get('/status/:sessionId', statusQrLimiter, (req, res) => {
   }
 });
 
-// נתיבים שדורשים אימות ו-Rate Limiting כללי
+// נתיבים שדורשים אימות
 router.use(authMiddleware);
-router.use(generalLimiter);
 
 router.post('/send', async (req, res) => {
   try {

@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const config = require('./config');
 const logger = require('./logger');
-const { generalLimiter } = require('./middleware/rateLimiter');
+const rateLimiter = require('./middleware/rateLimiter');
 const scraperRoutes = require('./routes/scraper.routes');
 const whatsappService = require('./services/whatsapp.service');
 
@@ -35,12 +35,13 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(helmet());
 app.use(compression());
+app.use(rateLimiter);
 
 // נתיבים
-app.use('/api/scraper', generalLimiter, scraperRoutes);
+app.use('/api/scraper', scraperRoutes);
 app.use('/api/whatsapp', require('./routes/whatsapp.routes'));
 
-// נתיב בדיקת בריאות - ללא Rate Limiting
+// נתיב בדיקת בריאות
 app.use('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -88,7 +89,19 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// הגדרת פונקציית הפעלת השרת
+// אתחול WhatsApp והפעלת השרת
+(async () => {
+  try {
+    const defaultSessionId = process.env.WHATSAPP_CLIENT_ID || 'default-session';
+    await whatsappService.initialize(defaultSessionId);
+    await startServer();
+  } catch (err) {
+    logger.error('Failed to initialize:', err);
+    process.exit(1);
+  }
+})();
+
+// הגעלת השרת
 const startServer = async (retries = 3) => {
   const PORT = process.env.PORT || 10000;
   const HOST = process.env.HOST || '0.0.0.0';
@@ -114,13 +127,3 @@ const startServer = async (retries = 3) => {
     process.exit(1);
   }
 };
-
-// הפעלת השרת
-(async () => {
-  try {
-    await startServer();
-  } catch (err) {
-    logger.error('Failed to initialize:', err);
-    process.exit(1);
-  }
-})();
