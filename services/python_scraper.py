@@ -3,6 +3,7 @@ import json
 import warnings
 import urllib3
 import sys
+import os
 import traceback
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -18,7 +19,22 @@ from webdriver_manager.chrome import ChromeDriverManager
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+def check_environment():
+    """בדיקת הסביבה והדפסת מידע שימושי לדיבוג"""
+    print("Python version:", sys.version, file=sys.stderr)
+    print("Current working directory:", os.getcwd(), file=sys.stderr)
+    print("PATH environment:", os.environ.get('PATH', ''), file=sys.stderr)
+    print("PYTHONPATH environment:", os.environ.get('PYTHONPATH', ''), file=sys.stderr)
+    print("Virtual env:", os.environ.get('VIRTUAL_ENV', 'Not in virtualenv'), file=sys.stderr)
+    
+    try:
+        import selenium
+        print("Selenium version:", selenium.__version__, file=sys.stderr)
+    except ImportError as e:
+        print("Selenium import error:", str(e), file=sys.stderr)
+
 def setup_driver():
+    check_environment()
     print("Setting up Chrome driver...", file=sys.stderr)
     try:
         chrome_options = Options()
@@ -30,9 +46,16 @@ def setup_driver():
         chrome_options.add_argument('--disable-notifications')
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--remote-debugging-port=9222')
         
         print("Installing Chrome driver...", file=sys.stderr)
-        service = Service(ChromeDriverManager().install())
+        try:
+            service = Service(ChromeDriverManager(cache_valid_range=1).install())
+        except Exception as e:
+            print(f"Error installing ChromeDriver: {str(e)}", file=sys.stderr)
+            # נסיון להשתמש בנתיב ברירת מחדל
+            service = Service('chromedriver')
+            
         print("Creating Chrome driver instance...", file=sys.stderr)
         driver = webdriver.Chrome(service=service, options=chrome_options)
         print("Chrome driver setup completed successfully", file=sys.stderr)
