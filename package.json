@@ -8,7 +8,9 @@
     "dev": "npx kill-port 10000 && nodemon --no-warnings server.js",
     "lint": "eslint .",
     "test": "jest",
-    "logs": "tail -f ./logs/app.log"
+    "logs": "tail -f ./logs/app.log",
+    "build": "npm install && python3 -m venv venv && . venv/bin/activate && pip install -r requirements.txt",
+    "postinstall": "python3 -m venv venv && . venv/bin/activate && pip install -r requirements.txt"
   },
   "dependencies": {
     "axios": "^1.7.9",
