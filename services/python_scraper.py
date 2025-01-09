@@ -19,6 +19,7 @@ warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def setup_driver():
+    print("Setting up Chrome driver...", file=sys.stderr)
     try:
         chrome_options = Options()
         chrome_options.add_argument('--headless')
@@ -30,8 +31,11 @@ def setup_driver():
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-infobars')
         
+        print("Installing Chrome driver...", file=sys.stderr)
         service = Service(ChromeDriverManager().install())
+        print("Creating Chrome driver instance...", file=sys.stderr)
         driver = webdriver.Chrome(service=service, options=chrome_options)
+        print("Chrome driver setup completed successfully", file=sys.stderr)
         return driver
     except Exception as e:
         error_msg = {
@@ -43,44 +47,44 @@ def setup_driver():
         sys.exit(1)
 
 def scrape_event_data(url):
+    print(f"Starting to scrape URL: {url}", file=sys.stderr)
     driver = None
     try:
         driver = setup_driver()
         
-        # טעינת הדף
+        print(f"Loading page: {url}", file=sys.stderr)
         driver.get(url)
         
-        # המתנה לטעינת התוכן
         try:
+            print("Waiting for page to load...", file=sys.stderr)
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
         except TimeoutException:
             raise Exception("Page load timeout")
         
-        # חילוץ הכותרת
+        print("Extracting title...", file=sys.stderr)
         title = driver.title.strip()
         if not title:
             raise Exception("Failed to extract title")
         
-        # חילוץ תמונה
+        print("Extracting image...", file=sys.stderr)
         try:
             image = driver.find_element(By.CSS_SELECTOR, 'meta[property="og:image"]').get_attribute('content')
         except NoSuchElementException:
-            # נסה למצוא תמונה בדרכים אחרות
             try:
                 image = driver.find_element(By.CSS_SELECTOR, 'img[src*="header"], img[src*="main"], img[src*="hero"]').get_attribute('src')
             except NoSuchElementException:
                 image = None
         
-        # חילוץ תאריך
+        print("Extracting date...", file=sys.stderr)
         date_text = None
         try:
             elements = driver.find_elements(By.XPATH, "//*[contains(text(), '05:30') or contains(text(), '23:30')]")
             if elements:
                 date_text = elements[0].text.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error extracting date: {str(e)}", file=sys.stderr)
         
         result = {
             "eventName": _cleanEventName(title),
@@ -89,6 +93,7 @@ def scrape_event_data(url):
             "url": url
         }
         
+        print("Scraping completed successfully", file=sys.stderr)
         print(json.dumps(result, ensure_ascii=False))
         return result
             
@@ -99,14 +104,15 @@ def scrape_event_data(url):
             "url": url
         }
         print(json.dumps(error_msg, ensure_ascii=False), file=sys.stderr)
-        return None
+        sys.exit(1)
         
     finally:
         if driver:
             try:
+                print("Closing Chrome driver...", file=sys.stderr)
                 driver.quit()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error closing driver: {str(e)}", file=sys.stderr)
 
 def _cleanEventName(eventName):
     if not eventName:
@@ -116,6 +122,8 @@ def _cleanEventName(eventName):
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         url = sys.argv[1]
+        print(f"Starting script with URL: {url}", file=sys.stderr)
         scrape_event_data(url)
     else:
-        print(json.dumps({"error": "No URL provided"}, ensure_ascii=False), file=sys.stderr) 
+        print(json.dumps({"error": "No URL provided"}, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1) 

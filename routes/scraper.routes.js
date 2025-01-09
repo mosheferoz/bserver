@@ -9,6 +9,8 @@ router.post('/scrape', async (req, res) => {
     try {
         const { url } = req.body;
         logger.info('Received scraping request for URL:', url);
+        logger.info('Request headers:', req.headers);
+        logger.info('Request body:', req.body);
         
         if (!url) {
             logger.warn('No URL provided in request');
@@ -23,28 +25,48 @@ router.post('/scrape', async (req, res) => {
         const pythonScriptPath = path.join(__dirname, '../services/python_scraper.py');
         logger.info('Python script path:', pythonScriptPath);
         
-        // שימוש ב-python3 ישירות
+        // שדיקה שהקובץ קיים
+        const fs = require('fs');
+        if (!fs.existsSync(pythonScriptPath)) {
+            logger.error('Python script not found at path:', pythonScriptPath);
+            return res.status(500).json({ 
+                error: 'Python script not found',
+                details: 'The scraping script is missing'
+            });
+        }
+        
+        // בדיקת גרסת Python
+        const pythonVersionProcess = spawn('python3', ['--version']);
+        pythonVersionProcess.stdout.on('data', (data) => {
+            logger.info('Python version:', data.toString());
+        });
+        
+        // הרצת הסקריפט
         const pythonProcess = spawn('python3', [pythonScriptPath, url]);
 
         let dataString = '';
         let errorString = '';
 
         pythonProcess.stdout.on('data', (data) => {
-            logger.debug('Python stdout:', data.toString());
-            dataString += data.toString();
+            const output = data.toString();
+            logger.debug('Python stdout:', output);
+            dataString += output;
         });
 
         pythonProcess.stderr.on('data', (data) => {
-            logger.error('Python stderr:', data.toString());
-            errorString += data.toString();
+            const error = data.toString();
+            logger.error('Python stderr:', error);
+            errorString += error;
         });
 
-        // טיפול בשגיאות תהליך
         pythonProcess.on('error', (error) => {
             logger.error('Failed to start Python process:', error);
             return res.status(500).json({ 
                 error: 'Failed to start scraping process',
-                details: error.message
+                details: error.message,
+                command: 'python3',
+                script: pythonScriptPath,
+                url: url
             });
         });
 
@@ -56,29 +78,31 @@ router.post('/scrape', async (req, res) => {
                 logger.error('Error output:', errorString);
                 
                 try {
-                    // נסה לפרסר את השגיאה מ-Python
                     const errorObj = JSON.parse(errorString);
                     return res.status(500).json({ 
                         error: 'Failed to scrape data',
-                        details: errorObj
+                        details: errorObj,
+                        exitCode: code
                     });
                 } catch (parseError) {
                     return res.status(500).json({ 
                         error: 'Failed to scrape data',
-                        details: errorString
+                        details: errorString || 'Unknown error occurred',
+                        exitCode: code
                     });
                 }
             }
 
             try {
-                logger.debug('Trying to parse Python output:', dataString);
+                logger.debug('Raw Python output:', dataString);
                 const result = JSON.parse(dataString);
                 
                 if (!result.eventName) {
                     logger.warn('No event name found in scraped data');
                     return res.status(404).json({ 
                         error: 'No event data found',
-                        details: 'Could not find event information on the page'
+                        details: 'Could not find event information on the page',
+                        rawData: result
                     });
                 }
                 
@@ -99,7 +123,8 @@ router.post('/scrape', async (req, res) => {
         logger.error('Server error:', error);
         return res.status(500).json({ 
             error: 'Internal server error',
-            details: error.message
+            details: error.message,
+            stack: error.stack
         });
     }
 });
