@@ -5,15 +5,9 @@ import urllib3
 import sys
 import os
 import traceback
-import chromedriver_autoinstaller
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import asyncio
+from pyppeteer import launch
 
 # ביטול כל האזהרות הקשורות ל-SSL
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
@@ -26,83 +20,59 @@ def check_environment():
     print("PATH environment:", os.environ.get('PATH', ''), file=sys.stderr)
     print("PYTHONPATH environment:", os.environ.get('PYTHONPATH', ''), file=sys.stderr)
     print("Virtual env:", os.environ.get('VIRTUAL_ENV', 'Not in virtualenv'), file=sys.stderr)
-    
-    try:
-        import selenium
-        print("Selenium version:", selenium.__version__, file=sys.stderr)
-    except ImportError as e:
-        print("Selenium import error:", str(e), file=sys.stderr)
 
-def setup_driver():
-    check_environment()
-    print("Setting up Chrome driver...", file=sys.stderr)
-    try:
-        # התקנה אוטומטית של ChromeDriver
-        chromedriver_autoinstaller.install()
-        
-        chrome_options = Options()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-infobars')
-        chrome_options.add_argument('--remote-debugging-port=9222')
-        chrome_options.add_argument('--disable-software-rasterizer')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-        
-        print("Creating Chrome driver instance...", file=sys.stderr)
-        driver = webdriver.Chrome(options=chrome_options)
-        print("Chrome driver setup completed successfully", file=sys.stderr)
-        return driver
-    except Exception as e:
-        error_msg = {
-            "error": "Failed to setup Chrome driver",
-            "details": str(e),
-            "trace": traceback.format_exc()
-        }
-        print(json.dumps(error_msg, ensure_ascii=False), file=sys.stderr)
-        sys.exit(1)
-
-def scrape_event_data(url):
+async def scrape_event_data(url):
     print(f"Starting to scrape URL: {url}", file=sys.stderr)
-    driver = None
+    browser = None
     try:
-        driver = setup_driver()
+        print("Launching browser...", file=sys.stderr)
+        browser = await launch({
+            'headless': True,
+            'args': [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-features=VizDisplayCompositor'
+            ]
+        })
         
-        print(f"Loading page: {url}", file=sys.stderr)
-        driver.get(url)
+        print("Creating new page...", file=sys.stderr)
+        page = await browser.newPage()
+        await page.setViewport({'width': 1920, 'height': 1080})
         
-        try:
-            print("Waiting for page to load...", file=sys.stderr)
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-        except TimeoutException:
-            raise Exception("Page load timeout")
+        print(f"Navigating to URL: {url}", file=sys.stderr)
+        await page.goto(url, {'waitUntil': 'networkidle0', 'timeout': 30000})
         
         print("Extracting title...", file=sys.stderr)
-        title = driver.title.strip()
+        title = await page.title()
         if not title:
             raise Exception("Failed to extract title")
         
         print("Extracting image...", file=sys.stderr)
+        image = None
         try:
-            image = driver.find_element(By.CSS_SELECTOR, 'meta[property="og:image"]').get_attribute('content')
-        except NoSuchElementException:
-            try:
-                image = driver.find_element(By.CSS_SELECTOR, 'img[src*="header"], img[src*="main"], img[src*="hero"]').get_attribute('src')
-            except NoSuchElementException:
-                image = None
+            image = await page.evaluate('''() => {
+                const ogImage = document.querySelector('meta[property="og:image"]');
+                if (ogImage) return ogImage.getAttribute('content');
+                
+                const headerImage = document.querySelector('img[src*="header"], img[src*="main"], img[src*="hero"]');
+                return headerImage ? headerImage.getAttribute('src') : null;
+            }''')
+        except Exception as e:
+            print(f"Error extracting image: {str(e)}", file=sys.stderr)
         
         print("Extracting date...", file=sys.stderr)
         date_text = None
         try:
-            elements = driver.find_elements(By.XPATH, "//*[contains(text(), '05:30') or contains(text(), '23:30')]")
-            if elements:
-                date_text = elements[0].text.strip()
+            date_text = await page.evaluate('''() => {
+                const elements = Array.from(document.querySelectorAll('*'));
+                const dateElement = elements.find(el => 
+                    el.textContent.includes('05:30') || el.textContent.includes('23:30')
+                );
+                return dateElement ? dateElement.textContent.trim() : null;
+            }''')
         except Exception as e:
             print(f"Error extracting date: {str(e)}", file=sys.stderr)
         
@@ -127,12 +97,12 @@ def scrape_event_data(url):
         sys.exit(1)
         
     finally:
-        if driver:
+        if browser:
             try:
-                print("Closing Chrome driver...", file=sys.stderr)
-                driver.quit()
+                print("Closing browser...", file=sys.stderr)
+                await browser.close()
             except Exception as e:
-                print(f"Error closing driver: {str(e)}", file=sys.stderr)
+                print(f"Error closing browser: {str(e)}", file=sys.stderr)
 
 def _cleanEventName(eventName):
     if not eventName:
@@ -143,7 +113,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         url = sys.argv[1]
         print(f"Starting script with URL: {url}", file=sys.stderr)
-        scrape_event_data(url)
+        asyncio.get_event_loop().run_until_complete(scrape_event_data(url))
     else:
         print(json.dumps({"error": "No URL provided"}, ensure_ascii=False), file=sys.stderr)
         sys.exit(1) 
