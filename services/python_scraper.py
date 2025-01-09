@@ -5,6 +5,7 @@ import urllib3
 import sys
 import os
 import traceback
+import chromedriver_autoinstaller
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -13,7 +14,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
 
 # ביטול כל האזהרות הקשורות ל-SSL
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
@@ -37,6 +37,9 @@ def setup_driver():
     check_environment()
     print("Setting up Chrome driver...", file=sys.stderr)
     try:
+        # התקנה אוטומטית של ChromeDriver
+        chromedriver_autoinstaller.install()
+        
         chrome_options = Options()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
@@ -47,17 +50,11 @@ def setup_driver():
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-infobars')
         chrome_options.add_argument('--remote-debugging-port=9222')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
         
-        print("Installing Chrome driver...", file=sys.stderr)
-        try:
-            service = Service(ChromeDriverManager(cache_valid_range=1).install())
-        except Exception as e:
-            print(f"Error installing ChromeDriver: {str(e)}", file=sys.stderr)
-            # נסיון להשתמש בנתיב ברירת מחדל
-            service = Service('chromedriver')
-            
         print("Creating Chrome driver instance...", file=sys.stderr)
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(options=chrome_options)
         print("Chrome driver setup completed successfully", file=sys.stderr)
         return driver
     except Exception as e:

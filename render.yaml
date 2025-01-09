@@ -2,7 +2,7 @@ services:
   - type: web
     name: whatsapp-bulk-sender
     env: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && python3 -m pip install --upgrade pip && python3 -m pip install -r requirements.txt
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -10,4 +10,12 @@ services:
       - key: PORT
         value: 10000
       - key: PYTHON_VERSION
-        value: 3.9.0 
+        value: 3.9.0
+      - key: PYTHONUNBUFFERED
+        value: "true"
+    buildFilter:
+      paths:
+        - package.json
+        - requirements.txt
+        - services/**
+        - routes/** 

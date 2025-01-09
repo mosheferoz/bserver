@@ -9,9 +9,10 @@
     "lint": "eslint .",
     "test": "jest",
     "logs": "tail -f ./logs/app.log",
-    "setup-python": "python3 -m pip install --upgrade pip && python3 -m venv venv && . venv/bin/activate && pip install -r requirements.txt",
-    "build": "npm run setup-python",
-    "postinstall": "npm run setup-python"
+    "setup-venv": "python3 -m venv venv",
+    "setup-deps": "python3 -m pip install --upgrade pip && python3 -m pip install -r requirements.txt",
+    "build": "npm install && python3 -m pip install --upgrade pip && python3 -m pip install -r requirements.txt",
+    "postinstall": "python3 -m pip install --upgrade pip && python3 -m pip install -r requirements.txt"
   },
   "dependencies": {
     "axios": "^1.7.9",
