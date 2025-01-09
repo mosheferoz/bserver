@@ -2,10 +2,12 @@ services:
   - type: web
     name: whatsapp-bulk-sender
     env: node
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000 
+        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.9.0 
