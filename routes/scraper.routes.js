@@ -23,16 +23,8 @@ router.post('/scrape', async (req, res) => {
         const pythonScriptPath = path.join(__dirname, '../services/python_scraper.py');
         logger.info('Python script path:', pythonScriptPath);
         
-        // בדיקת נתיב הסביבה הוירטואלית
-        const venvPath = process.env.PYTHON_VENV_PATH || path.join(process.cwd(), 'venv');
-        const pythonPath = path.join(
-            venvPath,
-            'bin',
-            'python'
-        );
-        logger.info('Using Python path:', pythonPath);
-        
-        const pythonProcess = spawn(pythonPath, [pythonScriptPath, url]);
+        // שימוש ב-python3 ישירות
+        const pythonProcess = spawn('python3', [pythonScriptPath, url]);
 
         let dataString = '';
         let errorString = '';
@@ -50,7 +42,7 @@ router.post('/scrape', async (req, res) => {
         // טיפול בשגיאות תהליך
         pythonProcess.on('error', (error) => {
             logger.error('Failed to start Python process:', error);
-            res.status(500).json({ 
+            return res.status(500).json({ 
                 error: 'Failed to start scraping process',
                 details: error.message
             });
@@ -91,11 +83,11 @@ router.post('/scrape', async (req, res) => {
                 }
                 
                 logger.info('Successfully scraped data:', result);
-                res.json(result);
+                return res.json(result);
             } catch (error) {
                 logger.error('Failed to parse Python output:', error);
                 logger.error('Raw output:', dataString);
-                res.status(500).json({ 
+                return res.status(500).json({ 
                     error: 'Failed to parse scraped data',
                     details: error.message,
                     raw: dataString
@@ -105,7 +97,7 @@ router.post('/scrape', async (req, res) => {
 
     } catch (error) {
         logger.error('Server error:', error);
-        res.status(500).json({ 
+        return res.status(500).json({ 
             error: 'Internal server error',
             details: error.message
         });
