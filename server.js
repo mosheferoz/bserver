@@ -57,8 +57,7 @@ app.get('/', (req, res) => {
         qr: '/api/whatsapp/qr/:sessionId',
         status: '/api/whatsapp/status/:sessionId',
         send: '/api/whatsapp/send',
-        history: '/api/whatsapp/history',
-        groups: '/api/whatsapp/groups/:sessionId'
+        history: '/api/whatsapp/history'
       },
       scraper: '/api/scraper/scrape'
     }
@@ -77,8 +76,7 @@ app.use((req, res) => {
         qr: '/api/whatsapp/qr/:sessionId',
         status: '/api/whatsapp/status/:sessionId',
         send: '/api/whatsapp/send',
-        history: '/api/whatsapp/history',
-        groups: '/api/whatsapp/groups/:sessionId'
+        history: '/api/whatsapp/history'
       },
       scraper: '/api/scraper/scrape'
     }

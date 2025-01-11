@@ -1,37 +1,20 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs-extra');
 const { rimraf } = require('rimraf');
 const config = require('../config');
 const logger = require('../logger');
 const path = require('path');
+const { LocalAuth } = require('whatsapp-web.js');
 const csv = require('csv-parser');
-const EventEmitter = require('events');
-const puppeteer = require('puppeteer');
 
-class WhatsAppService extends EventEmitter {
+class WhatsAppService {
   constructor() {
-    super();
     this.clients = new Map();
     this.qrCodes = new Map();
     this.isConnected = new Map();
     this.isInitializing = new Map();
     this.authPath = path.join(__dirname, '../whatsapp-auth');
-    this.qrCallbacks = new Map();
-    this.authFolder = path.join(__dirname, '../.wwebjs_auth');
-    this.initializeEventHandlers();
-  }
-
-  initializeEventHandlers() {
-    this.on('client.ready', (sessionId) => {
-      logger.info(`Client ${sessionId} is ready and fully connected`);
-      this.isConnected.set(sessionId, true);
-    });
-
-    this.on('client.disconnected', (sessionId) => {
-      logger.info(`Client ${sessionId} was disconnected`);
-      this.isConnected.set(sessionId, false);
-    });
   }
 
   async cleanupAuthFolder(sessionId) {
@@ -69,21 +52,24 @@ class WhatsAppService extends EventEmitter {
   }
 
   async initialize(sessionId) {
-    try {
-      logger.info(`Initializing WhatsApp client for session ${sessionId}`);
-      
-      if (this.clients.has(sessionId)) {
-        logger.info(`Client already exists for session ${sessionId}`);
-        return;
-      }
+    if (this.isInitializing.get(sessionId)) {
+      logger.info(`WhatsApp client is already initializing for session ${sessionId}`);
+      return;
+    }
 
-      const sessionDir = path.join(this.authFolder, sessionId);
-      await fs.promises.mkdir(sessionDir, { recursive: true });
+    try {
+      this.isInitializing.set(sessionId, true);
+      this.isConnected.set(sessionId, false);
+      logger.info(`Starting WhatsApp client initialization for session ${sessionId}...`);
+
+      await this.cleanupAuthFolder(sessionId);
+      const sessionPath = path.join(this.authPath, `session-${sessionId}`);
 
       const client = new Client({
+        restartOnAuthFail: true,
         authStrategy: new LocalAuth({
           clientId: sessionId,
-          dataPath: this.authFolder
+          dataPath: sessionPath
         }),
         puppeteer: {
           headless: true,
@@ -94,67 +80,95 @@ class WhatsAppService extends EventEmitter {
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--aggressive-cache-discard',
+            '--disable-cache',
+            '--disable-application-cache',
+            '--disable-offline-load-stale-cache',
+            '--disk-cache-size=0'
           ],
-          executablePath: require('puppeteer').executablePath()
-        }
-      });
-
-      client.on('qr', (qr) => {
-        logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
-        try {
-          qrcode.toDataURL(qr, (err, url) => {
-            if (!err) {
-              this.qrCodes.set(sessionId, url);
-              logger.info('QR code converted to data URL');
-            }
-          });
-        } catch (error) {
-          logger.error('Error converting QR code:', error);
+          timeout: 120000,
+          waitForInitialPage: true,
         }
       });
 
       client.on('ready', () => {
-        logger.info(`WhatsApp client is ready for session ${sessionId}`);
         this.isConnected.set(sessionId, true);
-        this.emit('client.ready', sessionId);
+        this.qrCodes.delete(sessionId);
+        logger.info(`WhatsApp client is ready and connected for session ${sessionId}`);
+      });
+
+      client.on('qr', async (qr) => {
+        try {
+          logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
+          const qrCode = await qrcode.toDataURL(qr);
+          this.qrCodes.set(sessionId, qrCode);
+          logger.info('QR code converted to data URL');
+        } catch (error) {
+          logger.error('Error generating QR code:', error);
+          this.qrCodes.delete(sessionId);
+        }
       });
 
       client.on('authenticated', () => {
-        logger.info(`WhatsApp client is authenticated for session ${sessionId}`);
+        this.isConnected.set(sessionId, true);
+        this.qrCodes.delete(sessionId);
+        logger.info(`WhatsApp client authenticated for session ${sessionId}`);
       });
 
-      client.on('disconnected', () => {
-        logger.info(`WhatsApp client was disconnected for session ${sessionId}`);
+      client.on('auth_failure', async (err) => {
         this.isConnected.set(sessionId, false);
-        this.emit('client.disconnected', sessionId);
+        this.qrCodes.delete(sessionId);
+        logger.error(`WhatsApp authentication failed for session ${sessionId}:`, err);
+        
+        await this.cleanupAuthFolder(sessionId);
+        setTimeout(() => this.initialize(sessionId), 5000);
+      });
+
+      client.on('disconnected', async (reason) => {
+        this.isConnected.set(sessionId, false);
+        this.qrCodes.delete(sessionId);
+        logger.error(`WhatsApp client disconnected for session ${sessionId}:`, reason);
+        
+        try {
+          if (this.clients.has(sessionId)) {
+            await this.clients.get(sessionId).destroy();
+            this.clients.delete(sessionId);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+          
+          await this.cleanupAuthFolder(sessionId);
+          
+          setTimeout(() => {
+            if (!this.isInitializing.get(sessionId)) {
+              this.initialize(sessionId);
+            }
+          }, 5000);
+        } catch (error) {
+          logger.error('Error handling disconnection:', error);
+        }
       });
 
       await client.initialize();
       this.clients.set(sessionId, client);
-      
       logger.info(`WhatsApp client initialized successfully for session ${sessionId}`);
     } catch (error) {
-      logger.error(`Error initializing WhatsApp client for session ${sessionId}:`, error);
-      throw error;
-    }
-  }
-
-  async getConnectionStatus(sessionId) {
-    try {
-      const client = this.clients.get(sessionId);
-      if (!client) {
-        return { connected: false, hasQR: false };
+      logger.error(`WhatsApp initialization error for session ${sessionId}:`, error);
+      this.isConnected.set(sessionId, false);
+      this.qrCodes.delete(sessionId);
+      
+      if (this.clients.has(sessionId)) {
+        try {
+          await this.clients.get(sessionId).destroy();
+        } catch (destroyError) {
+          logger.error('Error destroying client:', destroyError);
+        }
+        this.clients.delete(sessionId);
       }
-
-      const isConnected = this.isConnected.get(sessionId) || false;
-      return {
-        connected: isConnected,
-        hasQR: !isConnected
-      };
-    } catch (error) {
-      logger.error(`Error getting connection status for session ${sessionId}:`, error);
-      return { connected: false, hasQR: false };
+      
+      setTimeout(() => this.initialize(sessionId), 10000);
+    } finally {
+      this.isInitializing.delete(sessionId);
     }
   }
 
@@ -302,39 +316,6 @@ class WhatsAppService extends EventEmitter {
           reject(error);
         });
     });
-  }
-
-  async getGroups(sessionId) {
-    try {
-      const client = this.clients.get(sessionId);
-      if (!client) {
-        throw new Error('Session not found');
-      }
-
-      if (!client.isConnected) {
-        throw new Error('WhatsApp is not connected');
-      }
-
-      const chats = await client.getChats();
-      
-      const groups = chats
-        .filter(chat => chat.isGroup)
-        .map(group => ({
-          id: group.id._serialized,
-          name: group.name,
-          description: group.description || '',
-          participantsCount: group.participants.length,
-          imageUrl: group.profilePicUrl,
-          isAdmin: group.participants.some(p => 
-            p.id.user === client.info.wid.user && p.isAdmin
-          ),
-        }));
-
-      return groups;
-    } catch (error) {
-      logger.error('Error getting groups:', error);
-      throw error;
-    }
   }
 }
 

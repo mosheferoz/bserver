@@ -53,16 +53,26 @@ router.get('/qr/:sessionId', async (req, res) => {
   }
 });
 
-router.get('/status/:sessionId', async (req, res) => {
+router.get('/status/:sessionId', (req, res) => {
   try {
     const { sessionId } = req.params;
-    logger.info(`Status request received for session ${sessionId}`);
     
-    const status = await whatsappService.getConnectionStatus(sessionId);
-    res.json(status);
+    if (!sessionId) {
+      logger.error('Missing sessionId in status request');
+      return res.status(400).json({ 
+        error: 'Missing sessionId',
+        details: 'Session ID is required'
+      });
+    }
+
+    logger.info(`Status request received for session ${sessionId}`);
+    res.json(whatsappService.getStatus(sessionId));
   } catch (error) {
-    logger.error('Error checking status:', error);
-    res.status(500).json({ error: 'Failed to check status' });
+    logger.error(`Error in /status route for session ${req.params.sessionId}:`, error);
+    res.status(500).json({ 
+      error: 'Failed to get status',
+      details: error.message
+    });
   }
 });
 
@@ -292,18 +302,6 @@ router.post('/disconnect/:sessionId', async (req, res) => {
       error: 'Failed to disconnect',
       details: error.message
     });
-  }
-});
-
-// קבלת קבוצות WhatsApp
-router.get('/groups/:sessionId', async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const groups = await whatsappService.getGroups(sessionId);
-    res.json({ groups });
-  } catch (error) {
-    logger.error('Error getting WhatsApp groups:', error);
-    res.status(500).json({ error: 'Failed to get WhatsApp groups' });
   }
 });
 
