@@ -5,9 +5,9 @@ const { rimraf } = require('rimraf');
 const config = require('../config');
 const logger = require('../logger');
 const path = require('path');
-const { LocalAuth } = require('whatsapp-web.js');
 const csv = require('csv-parser');
 const EventEmitter = require('events');
+const puppeteer = require('puppeteer');
 
 class WhatsAppService extends EventEmitter {
   constructor() {
@@ -86,7 +86,17 @@ class WhatsAppService extends EventEmitter {
           dataPath: this.authFolder
         }),
         puppeteer: {
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+          ],
+          executablePath: require('puppeteer').executablePath()
         }
       });
 
