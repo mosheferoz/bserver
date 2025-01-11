@@ -53,26 +53,16 @@ router.get('/qr/:sessionId', async (req, res) => {
   }
 });
 
-router.get('/status/:sessionId', (req, res) => {
+router.get('/status/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
-    
-    if (!sessionId) {
-      logger.error('Missing sessionId in status request');
-      return res.status(400).json({ 
-        error: 'Missing sessionId',
-        details: 'Session ID is required'
-      });
-    }
-
     logger.info(`Status request received for session ${sessionId}`);
-    res.json(whatsappService.getStatus(sessionId));
+    
+    const status = await whatsappService.getConnectionStatus(sessionId);
+    res.json(status);
   } catch (error) {
-    logger.error(`Error in /status route for session ${req.params.sessionId}:`, error);
-    res.status(500).json({ 
-      error: 'Failed to get status',
-      details: error.message
-    });
+    logger.error('Error checking status:', error);
+    res.status(500).json({ error: 'Failed to check status' });
   }
 });
 
