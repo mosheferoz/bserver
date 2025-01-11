@@ -335,18 +335,18 @@ class WhatsAppService {
         .filter(chat => chat.isGroup)
         .map(group => ({
           id: group.id._serialized,
-          name: group.name || 'קבוצה ללא שם',
-          description: group.groupMetadata?.desc || '',
-          participantsCount: group.groupMetadata?.participants?.length || 0,
+          name: group.name,
+          description: group.description || '',
+          participantsCount: group.participants.length,
           imageUrl: group.profilePicUrl,
-          isAdmin: group.groupMetadata?.participants?.some(
-            p => p.id.user === client.info.wid.user && p.isAdmin
-          ) || false,
+          isAdmin: group.participants.some(p => 
+            p.id.user === client.info.wid.user && p.isAdmin
+          ),
         }));
 
       return groups;
     } catch (error) {
-      logger.error('Error getting WhatsApp groups:', error);
+      logger.error('Error getting groups:', error);
       throw error;
     }
   }
