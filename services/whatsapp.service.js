@@ -317,6 +317,39 @@ class WhatsAppService {
         });
     });
   }
+
+  async getGroups(sessionId) {
+    try {
+      const client = this.clients.get(sessionId);
+      if (!client) {
+        throw new Error('Session not found');
+      }
+
+      if (!client.isConnected) {
+        throw new Error('WhatsApp is not connected');
+      }
+
+      const chats = await client.getChats();
+      
+      const groups = chats
+        .filter(chat => chat.isGroup)
+        .map(group => ({
+          id: group.id._serialized,
+          name: group.name || 'קבוצה ללא שם',
+          description: group.groupMetadata?.desc || '',
+          participantsCount: group.groupMetadata?.participants?.length || 0,
+          imageUrl: group.profilePicUrl,
+          isAdmin: group.groupMetadata?.participants?.some(
+            p => p.id.user === client.info.wid.user && p.isAdmin
+          ) || false,
+        }));
+
+      return groups;
+    } catch (error) {
+      logger.error('Error getting WhatsApp groups:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new WhatsAppService(); 

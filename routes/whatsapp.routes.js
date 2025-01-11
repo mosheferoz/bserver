@@ -305,4 +305,16 @@ router.post('/disconnect/:sessionId', async (req, res) => {
   }
 });
 
+// קבלת קבוצות WhatsApp
+router.get('/groups/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const groups = await whatsappService.getGroups(sessionId);
+    res.json({ groups });
+  } catch (error) {
+    logger.error('Error getting WhatsApp groups:', error);
+    res.status(500).json({ error: 'Failed to get WhatsApp groups' });
+  }
+});
+
 module.exports = router; 
