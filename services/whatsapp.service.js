@@ -1,4 +1,4 @@
-const { Client } = require('whatsapp-web.js');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs-extra');
 const { rimraf } = require('rimraf');
@@ -7,9 +7,11 @@ const logger = require('../logger');
 const path = require('path');
 const { LocalAuth } = require('whatsapp-web.js');
 const csv = require('csv-parser');
+const EventEmitter = require('events');
 
-class WhatsAppService {
+class WhatsAppService extends EventEmitter {
   constructor() {
+    super();
     this.clients = new Map();
     this.qrCodes = new Map();
     this.isConnected = new Map();
@@ -21,7 +23,6 @@ class WhatsAppService {
   }
 
   initializeEventHandlers() {
-    // מאזין לאירועי התחברות והתנתקות
     this.on('client.ready', (sessionId) => {
       logger.info(`Client ${sessionId} is ready and fully connected`);
       this.isConnected.set(sessionId, true);
@@ -89,17 +90,24 @@ class WhatsAppService {
         }
       });
 
-      // הוספת מאזינים לאירועים
       client.on('qr', (qr) => {
         logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
-        if (this.qrCallbacks.has(sessionId)) {
-          this.qrCallbacks.get(sessionId)(qr);
+        try {
+          qrcode.toDataURL(qr, (err, url) => {
+            if (!err) {
+              this.qrCodes.set(sessionId, url);
+              logger.info('QR code converted to data URL');
+            }
+          });
+        } catch (error) {
+          logger.error('Error converting QR code:', error);
         }
       });
 
       client.on('ready', () => {
         logger.info(`WhatsApp client is ready for session ${sessionId}`);
         this.isConnected.set(sessionId, true);
+        this.emit('client.ready', sessionId);
       });
 
       client.on('authenticated', () => {
@@ -109,6 +117,7 @@ class WhatsAppService {
       client.on('disconnected', () => {
         logger.info(`WhatsApp client was disconnected for session ${sessionId}`);
         this.isConnected.set(sessionId, false);
+        this.emit('client.disconnected', sessionId);
       });
 
       await client.initialize();
