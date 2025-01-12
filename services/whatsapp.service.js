@@ -20,6 +20,61 @@ class WhatsAppService {
     this.cleanupInterval = setInterval(() => this.cleanupDisconnectedSessions(), 1000 * 60 * 5); // כל 5 דקות
   }
 
+  async createClient(sessionId) {
+    logger.info(`Creating new WhatsApp client for session ${sessionId}`);
+    
+    const sessionPath = path.join(this.authPath, `session-${sessionId}`);
+    await fs.ensureDir(sessionPath);
+
+    const client = new Client({
+      restartOnAuthFail: true,
+      authStrategy: new LocalAuth({
+        clientId: sessionId,
+        dataPath: sessionPath
+      }),
+      puppeteer: {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--aggressive-cache-discard',
+          '--disable-cache',
+          '--disable-application-cache',
+          '--disable-offline-load-stale-cache',
+          '--disk-cache-size=0'
+        ],
+        timeout: 120000,
+        waitForInitialPage: true,
+      }
+    });
+
+    client.on('qr', async (qr) => {
+      try {
+        logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
+        const qrCode = await qrcode.toDataURL(qr);
+        this.qrCodes.set(sessionId, qrCode);
+        logger.info('QR code converted to data URL');
+      } catch (error) {
+        logger.error('Error generating QR code:', error);
+        this.qrCodes.delete(sessionId);
+      }
+    });
+
+    try {
+      await client.initialize();
+      logger.info(`WhatsApp client initialized successfully for session ${sessionId}`);
+      return client;
+    } catch (error) {
+      logger.error(`Error initializing WhatsApp client for session ${sessionId}:`, error);
+      throw error;
+    }
+  }
+
   async cleanupAuthFolder(sessionId) {
     try {
       logger.info(`Starting auth folder cleanup for session ${sessionId}...`);
