@@ -305,81 +305,36 @@ router.post('/disconnect/:sessionId', async (req, res) => {
   }
 });
 
-// === נתיבי ניהול קבוצות ===
-
-// קבלת רשימת קבוצות
-router.get('/groups/:sessionId', authMiddleware, async (req, res) => {
+router.get('/groups/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      logger.error('Missing sessionId in groups request');
+      return res.status(400).json({ 
+        error: 'Missing sessionId',
+        details: 'Session ID is required'
+      });
+    }
+
+    logger.info(`Groups list request received for session ${sessionId}`);
+    
+    if (!whatsappService.isConnected.get(sessionId)) {
+      logger.error(`WhatsApp is not connected for session ${sessionId}`);
+      return res.status(503).json({ 
+        error: 'WhatsApp is not connected',
+        details: 'Please connect WhatsApp first'
+      });
+    }
+
     const groups = await whatsappService.getGroups(sessionId);
-    res.json(groups);
+    res.json({ groups });
   } catch (error) {
-    logger.error('Error getting groups:', error);
-    res.status(500).json({ error: 'Failed to get groups' });
-  }
-});
-
-// יצירת קבוצה חדשה
-router.post('/groups/create', authMiddleware, async (req, res) => {
-  try {
-    const { sessionId, name, description, participants } = req.body;
-    const group = await whatsappService.createGroup(sessionId, name, description, participants);
-    res.json(group);
-  } catch (error) {
-    logger.error('Error creating group:', error);
-    res.status(500).json({ error: 'Failed to create group' });
-  }
-});
-
-// הוספת משתתפים לקבוצה
-router.post('/groups/:groupId/participants/add', authMiddleware, async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const { sessionId, participants } = req.body;
-    await whatsappService.addParticipantsToGroup(sessionId, groupId, participants);
-    res.json({ success: true });
-  } catch (error) {
-    logger.error('Error adding participants:', error);
-    res.status(500).json({ error: 'Failed to add participants' });
-  }
-});
-
-// הסרת משתתפים מקבוצה
-router.post('/groups/:groupId/participants/remove', authMiddleware, async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const { sessionId, participants } = req.body;
-    await whatsappService.removeParticipantsFromGroup(sessionId, groupId, participants);
-    res.json({ success: true });
-  } catch (error) {
-    logger.error('Error removing participants:', error);
-    res.status(500).json({ error: 'Failed to remove participants' });
-  }
-});
-
-// קבלת קישור הזמנה לקבוצה
-router.get('/groups/:groupId/invite', authMiddleware, async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const { sessionId } = req.query;
-    const inviteLink = await whatsappService.getGroupInviteLink(sessionId, groupId);
-    res.json({ inviteLink });
-  } catch (error) {
-    logger.error('Error getting invite link:', error);
-    res.status(500).json({ error: 'Failed to get invite link' });
-  }
-});
-
-// שליחת הודעה לקבוצה
-router.post('/groups/:groupId/message', authMiddleware, async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const { sessionId, message } = req.body;
-    await whatsappService.sendMessageToGroup(sessionId, groupId, message);
-    res.json({ success: true });
-  } catch (error) {
-    logger.error('Error sending message to group:', error);
-    res.status(500).json({ error: 'Failed to send message' });
+    logger.error(`Error in /groups route for session ${req.params.sessionId}:`, error);
+    res.status(500).json({ 
+      error: 'Failed to get groups',
+      details: error.message
+    });
   }
 });
 

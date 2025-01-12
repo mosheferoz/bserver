@@ -375,106 +375,46 @@ class WhatsAppService {
     });
   }
 
-  // === פונקציות ניהול קבוצות ===
-
-  // קבלת רשימת הקבוצות
   async getGroups(sessionId) {
     try {
-      const client = await this.getClient(sessionId);
-      if (!client) throw new Error('Client not found');
-
-      const groups = await client.getGroups();
-      return groups.map(group => ({
-        id: group.id._serialized,
-        name: group.name,
-        description: group.description || '',
-        participants: group.participants.map(p => p.id._serialized),
-        createdAt: group.creation,
-        isAdmin: group.participants.find(p => p.id._serialized === client.info.wid._serialized)?.isAdmin || false
-      }));
-    } catch (error) {
-      logger.error('Error getting groups:', error);
-      throw error;
-    }
-  }
-
-  // יצירת קבוצה חדשה
-  async createGroup(sessionId, name, description, participants) {
-    try {
-      const client = await this.getClient(sessionId);
-      if (!client) throw new Error('Client not found');
-
-      const group = await client.createGroup(name, participants);
-      if (description) {
-        await client.setGroupDescription(group.gid._serialized, description);
+      logger.info(`Getting groups for session ${sessionId}`);
+      
+      const client = this.clients.get(sessionId);
+      if (!client) {
+        throw new Error('WhatsApp client not found');
       }
 
-      return {
-        id: group.gid._serialized,
-        name,
-        description,
-        participants,
-        createdAt: new Date(),
-        isAdmin: true
-      };
+      // קבלת כל הצ'אטים
+      const chats = await client.getChats();
+      
+      // סינון רק קבוצות
+      const groups = chats.filter(chat => chat.isGroup);
+      
+      // מיפוי המידע הרלוונטי
+      const groupsData = await Promise.all(groups.map(async (group) => {
+        try {
+          const participants = await group.participants || [];
+          return {
+            id: group.id._serialized,
+            name: group.name,
+            participantsCount: participants.length,
+            description: group.description || '',
+            createdAt: group.createdAt ? new Date(group.createdAt * 1000).toISOString() : null,
+            isReadOnly: group.isReadOnly || false
+          };
+        } catch (err) {
+          logger.error(`Error processing group ${group.id._serialized}:`, err);
+          return null;
+        }
+      }));
+
+      // סינון קבוצות שנכשלו בעיבוד
+      const validGroups = groupsData.filter(group => group !== null);
+      
+      logger.info(`Found ${validGroups.length} groups for session ${sessionId}`);
+      return validGroups;
     } catch (error) {
-      logger.error('Error creating group:', error);
-      throw error;
-    }
-  }
-
-  // הוספת משתתפים לקבוצה
-  async addParticipantsToGroup(sessionId, groupId, participants) {
-    try {
-      const client = await this.getClient(sessionId);
-      if (!client) throw new Error('Client not found');
-
-      await client.addParticipants(groupId, participants);
-      return true;
-    } catch (error) {
-      logger.error('Error adding participants:', error);
-      throw error;
-    }
-  }
-
-  // הסרת משתתפים מקבוצה
-  async removeParticipantsFromGroup(sessionId, groupId, participants) {
-    try {
-      const client = await this.getClient(sessionId);
-      if (!client) throw new Error('Client not found');
-
-      await client.removeParticipants(groupId, participants);
-      return true;
-    } catch (error) {
-      logger.error('Error removing participants:', error);
-      throw error;
-    }
-  }
-
-  // קבלת קישור הזמנה לקבוצה
-  async getGroupInviteLink(sessionId, groupId) {
-    try {
-      const client = await this.getClient(sessionId);
-      if (!client) throw new Error('Client not found');
-
-      const inviteLink = await client.getGroupInviteLink(groupId);
-      return inviteLink;
-    } catch (error) {
-      logger.error('Error getting invite link:', error);
-      throw error;
-    }
-  }
-
-  // שליחת הודעה לקבוצה
-  async sendMessageToGroup(sessionId, groupId, message) {
-    try {
-      const client = await this.getClient(sessionId);
-      if (!client) throw new Error('Client not found');
-
-      await client.sendMessage(groupId, message);
-      return true;
-    } catch (error) {
-      logger.error('Error sending message to group:', error);
+      logger.error(`Error getting groups for session ${sessionId}:`, error);
       throw error;
     }
   }
