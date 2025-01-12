@@ -338,4 +338,37 @@ router.get('/groups/:sessionId', async (req, res) => {
   }
 });
 
+router.get('/groups/:sessionId/:groupId', async (req, res) => {
+  try {
+    const { sessionId, groupId } = req.params;
+    
+    if (!sessionId || !groupId) {
+      logger.error('Missing required parameters');
+      return res.status(400).json({ 
+        error: 'Missing parameters',
+        details: 'Session ID and Group ID are required'
+      });
+    }
+
+    logger.info(`Group details request received for group ${groupId} in session ${sessionId}`);
+    
+    if (!whatsappService.isConnected.get(sessionId)) {
+      logger.error(`WhatsApp is not connected for session ${sessionId}`);
+      return res.status(503).json({ 
+        error: 'WhatsApp is not connected',
+        details: 'Please connect WhatsApp first'
+      });
+    }
+
+    const groupDetails = await whatsappService.getGroupDetails(sessionId, groupId);
+    res.json({ group: groupDetails });
+  } catch (error) {
+    logger.error(`Error in /groups/:sessionId/:groupId route:`, error);
+    res.status(500).json({ 
+      error: 'Failed to get group details',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router; 

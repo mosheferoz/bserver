@@ -387,34 +387,55 @@ class WhatsAppService {
       // קבלת כל הצ'אטים
       const chats = await client.getChats();
       
-      // סינון רק קבוצות
-      const groups = chats.filter(chat => chat.isGroup);
-      
-      // מיפוי המידע הרלוונטי
-      const groupsData = await Promise.all(groups.map(async (group) => {
-        try {
-          const participants = await group.participants || [];
-          return {
-            id: group.id._serialized,
-            name: group.name,
-            participantsCount: participants.length,
-            description: group.description || '',
-            createdAt: group.createdAt ? new Date(group.createdAt * 1000).toISOString() : null,
-            isReadOnly: group.isReadOnly || false
-          };
-        } catch (err) {
-          logger.error(`Error processing group ${group.id._serialized}:`, err);
-          return null;
-        }
-      }));
+      // סינון רק קבוצות וקבלת מידע בסיסי
+      const groups = chats
+        .filter(chat => chat.isGroup)
+        .map(group => ({
+          id: group.id._serialized,
+          name: group.name || 'קבוצה ללא שם',
+          participantsCount: group.participants?.length || 0,
+          isReadOnly: group.isReadOnly || false,
+        }));
 
-      // סינון קבוצות שנכשלו בעיבוד
-      const validGroups = groupsData.filter(group => group !== null);
-      
-      logger.info(`Found ${validGroups.length} groups for session ${sessionId}`);
-      return validGroups;
+      logger.info(`Found ${groups.length} groups for session ${sessionId}`);
+      return groups;
     } catch (error) {
       logger.error(`Error getting groups for session ${sessionId}:`, error);
+      throw error;
+    }
+  }
+
+  // פונקציה חדשה לקבלת מידע מפורט על קבוצה ספציפית
+  async getGroupDetails(sessionId, groupId) {
+    try {
+      logger.info(`Getting details for group ${groupId} in session ${sessionId}`);
+      
+      const client = this.clients.get(sessionId);
+      if (!client) {
+        throw new Error('WhatsApp client not found');
+      }
+
+      const chat = await client.getChatById(groupId);
+      if (!chat || !chat.isGroup) {
+        throw new Error('Group not found');
+      }
+
+      const participants = await chat.participants || [];
+      
+      return {
+        id: chat.id._serialized,
+        name: chat.name || 'קבוצה ללא שם',
+        participantsCount: participants.length,
+        description: chat.description || '',
+        createdAt: chat.createdAt ? new Date(chat.createdAt * 1000).toISOString() : null,
+        isReadOnly: chat.isReadOnly || false,
+        participants: participants.map(p => ({
+          id: p.id._serialized,
+          isAdmin: p.isAdmin || false,
+        })),
+      };
+    } catch (error) {
+      logger.error(`Error getting group details for ${groupId}:`, error);
       throw error;
     }
   }
