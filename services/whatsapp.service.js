@@ -80,92 +80,75 @@ class WhatsAppService {
       logger.info(`Starting auth folder cleanup for session ${sessionId}...`);
       const sessionPath = path.join(this.authPath, `session-${sessionId}`);
 
+      // ניקוי הקליינט הקיים
       if (this.clients.has(sessionId)) {
-        try {
-          const client = this.clients.get(sessionId);
-          if (client) {
-            // נסה לנתק את הלקוח בצורה מסודרת
-            try {
-              await client.logout();
-            } catch (logoutErr) {
-              logger.warn('Error during logout:', logoutErr);
-            }
+        const client = this.clients.get(sessionId);
+        if (client) {
+          try {
+            // ניסיון להתנתק בצורה מסודרת
+            await client.logout().catch(err => {
+              logger.warn(`Logout failed for session ${sessionId}:`, err);
+            });
             
-            try {
-              await client.destroy();
-            } catch (destroyErr) {
-              logger.warn('Error during client destroy:', destroyErr);
-            }
+            await client.destroy().catch(err => {
+              logger.warn(`Destroy failed for session ${sessionId}:`, err);
+            });
             
             this.clients.delete(sessionId);
-            logger.info(`Existing client destroyed for session ${sessionId}`);
+            logger.info(`Client destroyed for session ${sessionId}`);
+          } catch (err) {
+            logger.warn(`Error during client cleanup for session ${sessionId}:`, err);
           }
-          
-          // המתן קצת לפני המשך הניקוי
-          await new Promise(resolve => setTimeout(resolve, 5000));
-        } catch (err) {
-          logger.warn('Error cleaning up client:', err);
         }
       }
 
-      // מחיקת תיקיית המטמון בנפרד
-      const cachePath = path.join(sessionPath, 'session-' + sessionId, 'Default', 'Cache');
-      if (fs.existsSync(cachePath)) {
-        try {
-          await rimraf(cachePath, { 
-            maxRetries: 5,
-            recursive: true,
-            force: true 
-          });
-          logger.info('Cache folder removed successfully');
-        } catch (cacheErr) {
-          logger.warn('Error removing cache folder:', cacheErr);
-        }
-      }
+      // המתנה קצרה לפני ניקוי הקבצים
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // מחיקת תיקיית הסשן
-      if (fs.existsSync(sessionPath)) {
+      // ניקוי תיקיות בצורה רקורסיבית
+      if (await fs.pathExists(sessionPath)) {
         try {
-          await rimraf(sessionPath, { 
-            maxRetries: 5,
-            recursive: true,
-            force: true,
-            retryDelay: 1000
-          });
-          logger.info('Session folder removed successfully');
-        } catch (sessionErr) {
-          logger.warn('Error removing session folder:', sessionErr);
-          
-          // אם נכשל, ננסה למחוק קבצים בודדים
-          try {
-            const files = await fs.readdir(sessionPath, { recursive: true });
-            for (const file of files) {
-              const filePath = path.join(sessionPath, file);
+          // קודם ננקה קבצים בודדים
+          const cleanFiles = async (dir) => {
+            const entries = await fs.readdir(dir, { withFileTypes: true });
+            
+            for (const entry of entries) {
+              const fullPath = path.join(dir, entry.name);
               try {
-                await fs.remove(filePath);
-              } catch (fileErr) {
-                logger.warn(`Failed to remove file ${filePath}:`, fileErr);
+                if (entry.isDirectory()) {
+                  await cleanFiles(fullPath);
+                  await fs.rmdir(fullPath).catch(() => {});
+                } else {
+                  await fs.unlink(fullPath).catch(() => {});
+                }
+              } catch (err) {
+                logger.warn(`Failed to remove ${fullPath}:`, err);
               }
             }
-          } catch (readErr) {
-            logger.warn('Error reading session directory:', readErr);
-          }
+          };
+
+          await cleanFiles(sessionPath);
+          
+          // ניסיון למחוק את התיקייה הראשית
+          await fs.rm(sessionPath, { 
+            force: true, 
+            recursive: true,
+            maxRetries: 5,
+            retryDelay: 1000
+          }).catch(err => {
+            logger.warn(`Failed to remove main session directory ${sessionPath}:`, err);
+          });
+        } catch (err) {
+          logger.warn(`Error during recursive cleanup of ${sessionPath}:`, err);
         }
       }
 
-      // יצירת תיקייה חדשה
-      try {
-        await fs.ensureDir(sessionPath);
-        logger.info('Session folder recreated');
-      } catch (mkdirErr) {
-        logger.warn('Error creating new session folder:', mkdirErr);
-      }
-
-      // המתנה נוספת לפני סיום
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // יצירת תיקייה חדשה נקייה
+      await fs.ensureDir(sessionPath);
+      logger.info(`Auth folder cleanup completed for session ${sessionId}`);
     } catch (error) {
-      logger.error('Error in cleanupAuthFolder:', error);
-      throw error;
+      logger.error(`Error in cleanupAuthFolder for session ${sessionId}:`, error);
+      // לא נזרוק שגיאה - נמשיך הלאה
     }
   }
 
@@ -200,20 +183,29 @@ class WhatsAppService {
   }
 
   setupEventListeners(client, sessionId) {
-    client.on('qr', (qr) => {
-      logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
-      // טיפול ב-QR
+    client.on('qr', async (qr) => {
+      try {
+        logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
+        const qrCode = await qrcode.toDataURL(qr);
+        this.qrCodes.set(sessionId, qrCode);
+        logger.info('QR code converted to data URL');
+      } catch (error) {
+        logger.error('Error generating QR code:', error);
+        this.qrCodes.delete(sessionId);
+      }
     });
 
     client.on('ready', () => {
       logger.info(`WhatsApp client is ready for session ${sessionId}`);
       this.isConnected.set(sessionId, true);
       this.reconnectAttempts.set(sessionId, 0);
+      this.qrCodes.delete(sessionId);
     });
 
     client.on('disconnected', async (reason) => {
       logger.error(`WhatsApp client disconnected for session ${sessionId}:`, reason);
       this.isConnected.set(sessionId, false);
+      this.qrCodes.delete(sessionId);
 
       // ניסיון להתחבר מחדש
       const attempts = this.reconnectAttempts.get(sessionId) || 0;
@@ -223,9 +215,19 @@ class WhatsAppService {
         
         try {
           await this.cleanup(sessionId);
+          // המתנה קצרה לפני ניסיון התחברות מחדש
+          await new Promise(resolve => setTimeout(resolve, 5000));
           await this.initialize(sessionId);
         } catch (error) {
           logger.error(`Failed to reconnect for session ${sessionId}:`, error);
+          // אם נכשל, ננסה שוב אחרי זמן קצר
+          setTimeout(async () => {
+            try {
+              await this.initialize(sessionId);
+            } catch (retryError) {
+              logger.error(`Retry reconnection failed for session ${sessionId}:`, retryError);
+            }
+          }, 10000);
         }
       } else {
         logger.warn(`Max reconnection attempts reached for session ${sessionId}`);
@@ -233,20 +235,60 @@ class WhatsAppService {
       }
     });
 
+    // הוספת מאזין חדש לניתוק מהטלפון
     client.on('auth_failure', async (error) => {
       logger.error(`Authentication failed for session ${sessionId}:`, error);
       this.isConnected.set(sessionId, false);
+      this.qrCodes.delete(sessionId);
+      
+      // ניקוי מיידי במקרה של ניתוק מהטלפון
       await this.cleanup(sessionId);
+      
+      // המתנה קצרה ואז ניסיון התחברות מחדש
+      setTimeout(async () => {
+        try {
+          await this.initialize(sessionId);
+        } catch (initError) {
+          logger.error(`Failed to reinitialize after auth failure for session ${sessionId}:`, initError);
+        }
+      }, 5000);
     });
 
-    // טיפול בשגיאות כלליות
+    client.on('change_state', async (state) => {
+      logger.info(`State changed to ${state} for session ${sessionId}`);
+      if (state === 'UNPAIRED' || state === 'CONFLICT' || state === 'UNLAUNCHED') {
+        logger.warn(`Critical state change detected: ${state}`);
+        await this.handleStateChange(sessionId, state);
+      }
+    });
+
     client.on('error', async (error) => {
       logger.error(`Error in WhatsApp client for session ${sessionId}:`, error);
-      // לא מנתקים מיד - נותנים צ'אנס להתאושש
-      if (error.message.includes('browser disconnected') || error.message.includes('Target closed')) {
+      if (error.message.includes('browser disconnected') || 
+          error.message.includes('Target closed') ||
+          error.message.includes('ENOTEMPTY')) {
         await this.handleBrowserDisconnection(sessionId);
       }
     });
+  }
+
+  async handleStateChange(sessionId, state) {
+    logger.info(`Handling state change ${state} for session ${sessionId}`);
+    try {
+      await this.cleanup(sessionId);
+      
+      if (state !== 'UNLAUNCHED') {
+        setTimeout(async () => {
+          try {
+            await this.initialize(sessionId);
+          } catch (error) {
+            logger.error(`Failed to reinitialize after state change for session ${sessionId}:`, error);
+          }
+        }, 5000);
+      }
+    } catch (error) {
+      logger.error(`Error handling state change for session ${sessionId}:`, error);
+    }
   }
 
   async handleBrowserDisconnection(sessionId) {
@@ -269,21 +311,15 @@ class WhatsAppService {
   async cleanup(sessionId) {
     logger.info(`Starting cleanup for session ${sessionId}...`);
     try {
-      const client = this.clients.get(sessionId);
-      if (client) {
-        try {
-          await client.destroy();
-        } catch (error) {
-          logger.error(`Error destroying client for session ${sessionId}:`, error);
-        }
-      }
+      // ניקוי נתונים מהזיכרון
+      this.qrCodes.delete(sessionId);
+      this.isConnected.set(sessionId, false);
       
-      this.clients.delete(sessionId);
-      this.isConnected.delete(sessionId);
-      this.reconnectAttempts.delete(sessionId);
-      
-      // ניקוי תיקיית האימות
+      // ניקוי הקליינט והתיקיות
       await this.cleanupAuthFolder(sessionId);
+      
+      // איפוס ניסיונות התחברות מחדש
+      this.reconnectAttempts.delete(sessionId);
       
       logger.info(`Cleanup completed for session ${sessionId}`);
     } catch (error) {
