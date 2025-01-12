@@ -24,30 +24,90 @@ class WhatsAppService {
 
       if (this.clients.has(sessionId)) {
         try {
-          await this.clients.get(sessionId).destroy();
-          this.clients.delete(sessionId);
-          logger.info(`Existing client destroyed for session ${sessionId}`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          const client = this.clients.get(sessionId);
+          if (client) {
+            // נסה לנתק את הלקוח בצורה מסודרת
+            try {
+              await client.logout();
+            } catch (logoutErr) {
+              logger.warn('Error during logout:', logoutErr);
+            }
+            
+            try {
+              await client.destroy();
+            } catch (destroyErr) {
+              logger.warn('Error during client destroy:', destroyErr);
+            }
+            
+            this.clients.delete(sessionId);
+            logger.info(`Existing client destroyed for session ${sessionId}`);
+          }
+          
+          // המתן קצת לפני המשך הניקוי
+          await new Promise(resolve => setTimeout(resolve, 5000));
         } catch (err) {
-          logger.warn('Error destroying client:', err);
+          logger.warn('Error cleaning up client:', err);
         }
       }
 
-      if (fs.existsSync(sessionPath)) {
-        await rimraf(sessionPath, { 
-          maxRetries: 3,
-          recursive: true,
-          force: true
-        });
-        logger.info('Session folder removed');
+      // מחיקת תיקיית המטמון בנפרד
+      const cachePath = path.join(sessionPath, 'session-' + sessionId, 'Default', 'Cache');
+      if (fs.existsSync(cachePath)) {
+        try {
+          await rimraf(cachePath, { 
+            maxRetries: 5,
+            recursive: true,
+            force: true 
+          });
+          logger.info('Cache folder removed successfully');
+        } catch (cacheErr) {
+          logger.warn('Error removing cache folder:', cacheErr);
+        }
       }
 
-      await fs.ensureDir(sessionPath);
-      logger.info('Session folder recreated');
+      // מחיקת תיקיית הסשן
+      if (fs.existsSync(sessionPath)) {
+        try {
+          await rimraf(sessionPath, { 
+            maxRetries: 5,
+            recursive: true,
+            force: true,
+            retryDelay: 1000
+          });
+          logger.info('Session folder removed successfully');
+        } catch (sessionErr) {
+          logger.warn('Error removing session folder:', sessionErr);
+          
+          // אם נכשל, ננסה למחוק קבצים בודדים
+          try {
+            const files = await fs.readdir(sessionPath, { recursive: true });
+            for (const file of files) {
+              const filePath = path.join(sessionPath, file);
+              try {
+                await fs.remove(filePath);
+              } catch (fileErr) {
+                logger.warn(`Failed to remove file ${filePath}:`, fileErr);
+              }
+            }
+          } catch (readErr) {
+            logger.warn('Error reading session directory:', readErr);
+          }
+        }
+      }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // יצירת תיקייה חדשה
+      try {
+        await fs.ensureDir(sessionPath);
+        logger.info('Session folder recreated');
+      } catch (mkdirErr) {
+        logger.warn('Error creating new session folder:', mkdirErr);
+      }
+
+      // המתנה נוספת לפני סיום
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (error) {
       logger.error('Error in cleanupAuthFolder:', error);
+      throw error;
     }
   }
 
@@ -131,19 +191,13 @@ class WhatsAppService {
         logger.error(`WhatsApp client disconnected for session ${sessionId}:`, reason);
         
         try {
-          if (this.clients.has(sessionId)) {
-            await this.clients.get(sessionId).destroy();
-            this.clients.delete(sessionId);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-          
           await this.cleanupAuthFolder(sessionId);
           
           setTimeout(() => {
             if (!this.isInitializing.get(sessionId)) {
               this.initialize(sessionId);
             }
-          }, 5000);
+          }, 10000);
         } catch (error) {
           logger.error('Error handling disconnection:', error);
         }
@@ -159,14 +213,17 @@ class WhatsAppService {
       
       if (this.clients.has(sessionId)) {
         try {
-          await this.clients.get(sessionId).destroy();
+          const client = this.clients.get(sessionId);
+          if (client) {
+            await client.destroy();
+          }
         } catch (destroyError) {
           logger.error('Error destroying client:', destroyError);
         }
         this.clients.delete(sessionId);
       }
       
-      setTimeout(() => this.initialize(sessionId), 10000);
+      setTimeout(() => this.initialize(sessionId), 15000);
     } finally {
       this.isInitializing.delete(sessionId);
     }
@@ -316,6 +373,110 @@ class WhatsAppService {
           reject(error);
         });
     });
+  }
+
+  // === פונקציות ניהול קבוצות ===
+
+  // קבלת רשימת הקבוצות
+  async getGroups(sessionId) {
+    try {
+      const client = await this.getClient(sessionId);
+      if (!client) throw new Error('Client not found');
+
+      const groups = await client.getGroups();
+      return groups.map(group => ({
+        id: group.id._serialized,
+        name: group.name,
+        description: group.description || '',
+        participants: group.participants.map(p => p.id._serialized),
+        createdAt: group.creation,
+        isAdmin: group.participants.find(p => p.id._serialized === client.info.wid._serialized)?.isAdmin || false
+      }));
+    } catch (error) {
+      logger.error('Error getting groups:', error);
+      throw error;
+    }
+  }
+
+  // יצירת קבוצה חדשה
+  async createGroup(sessionId, name, description, participants) {
+    try {
+      const client = await this.getClient(sessionId);
+      if (!client) throw new Error('Client not found');
+
+      const group = await client.createGroup(name, participants);
+      if (description) {
+        await client.setGroupDescription(group.gid._serialized, description);
+      }
+
+      return {
+        id: group.gid._serialized,
+        name,
+        description,
+        participants,
+        createdAt: new Date(),
+        isAdmin: true
+      };
+    } catch (error) {
+      logger.error('Error creating group:', error);
+      throw error;
+    }
+  }
+
+  // הוספת משתתפים לקבוצה
+  async addParticipantsToGroup(sessionId, groupId, participants) {
+    try {
+      const client = await this.getClient(sessionId);
+      if (!client) throw new Error('Client not found');
+
+      await client.addParticipants(groupId, participants);
+      return true;
+    } catch (error) {
+      logger.error('Error adding participants:', error);
+      throw error;
+    }
+  }
+
+  // הסרת משתתפים מקבוצה
+  async removeParticipantsFromGroup(sessionId, groupId, participants) {
+    try {
+      const client = await this.getClient(sessionId);
+      if (!client) throw new Error('Client not found');
+
+      await client.removeParticipants(groupId, participants);
+      return true;
+    } catch (error) {
+      logger.error('Error removing participants:', error);
+      throw error;
+    }
+  }
+
+  // קבלת קישור הזמנה לקבוצה
+  async getGroupInviteLink(sessionId, groupId) {
+    try {
+      const client = await this.getClient(sessionId);
+      if (!client) throw new Error('Client not found');
+
+      const inviteLink = await client.getGroupInviteLink(groupId);
+      return inviteLink;
+    } catch (error) {
+      logger.error('Error getting invite link:', error);
+      throw error;
+    }
+  }
+
+  // שליחת הודעה לקבוצה
+  async sendMessageToGroup(sessionId, groupId, message) {
+    try {
+      const client = await this.getClient(sessionId);
+      if (!client) throw new Error('Client not found');
+
+      await client.sendMessage(groupId, message);
+      return true;
+    } catch (error) {
+      logger.error('Error sending message to group:', error);
+      throw error;
+    }
   }
 }
 
