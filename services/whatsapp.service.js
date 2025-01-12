@@ -18,9 +18,6 @@ class WhatsAppService {
     this.reconnectAttempts = new Map();
     this.maxReconnectAttempts = 3;
     this.cleanupInterval = setInterval(() => this.cleanupDisconnectedSessions(), 1000 * 60 * 5); // כל 5 דקות
-    this.groupsCache = new Map(); // מטמון לקבוצות
-    this.groupsCacheTimeout = 5 * 60 * 1000; // 5 דקות
-    this.lastGroupsFetch = new Map(); // זמן אחרון שהקבוצות נטענו
   }
 
   async createClient(sessionId) {
@@ -56,6 +53,28 @@ class WhatsAppService {
       }
     });
 
+    // הוספת כל האירועים האפשריים לדיבוג
+    client.on('loading_screen', (percent, message) => {
+      logger.info(`Loading screen: ${percent}% - ${message}`);
+    });
+
+    client.on('authenticated', () => {
+      logger.info(`WhatsApp client authenticated for session ${sessionId}`);
+      this.isConnected.set(sessionId, true);
+      this.qrCodes.delete(sessionId);
+    });
+
+    client.on('auth_failure', (msg) => {
+      logger.error(`Auth failure for session ${sessionId}:`, msg);
+      this.isConnected.set(sessionId, false);
+    });
+
+    client.on('ready', () => {
+      logger.info(`WhatsApp client is ready for session ${sessionId}`);
+      this.isConnected.set(sessionId, true);
+      this.qrCodes.delete(sessionId);
+    });
+
     client.on('qr', async (qr) => {
       try {
         logger.info(`Received QR code from WhatsApp for session ${sessionId}`);
@@ -68,7 +87,14 @@ class WhatsAppService {
       }
     });
 
+    client.on('disconnected', (reason) => {
+      logger.warn(`Client was disconnected for session ${sessionId}. Reason:`, reason);
+      this.isConnected.set(sessionId, false);
+      this.qrCodes.delete(sessionId);
+    });
+
     try {
+      logger.info(`Initializing WhatsApp client for session ${sessionId}`);
       await client.initialize();
       logger.info(`WhatsApp client initialized successfully for session ${sessionId}`);
       return client;
@@ -501,68 +527,43 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      // קדיקה אם יש מטמון תקף
-      const cachedData = this.groupsCache.get(sessionId);
-      const lastFetch = this.lastGroupsFetch.get(sessionId);
-      const now = Date.now();
-      
-      if (cachedData && lastFetch && (now - lastFetch < this.groupsCacheTimeout)) {
-        logger.info(`Returning ${cachedData.length} groups from cache`);
-        return cachedData;
-      }
-
-      // קבלת כל הצ'אטים בצורה יעילה יותר
+      // קבלת כל הצ'אטים
       const chats = await client.getChats();
       logger.info(`Found ${chats.length} total chats`);
       
-      // סינון רהיר של קבוצות לפי המזהה בלבד
-      const groups = chats.filter(chat => 
-        chat.id._serialized.endsWith('@g.us')
-      );
+      // סינון רבוצות לפי מספר מאפיינים
+      const groups = chats.filter(chat => {
+        const isGroup = chat.isGroup || 
+                       chat.groupMetadata || 
+                       (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us')) ||
+                       chat.participants?.length > 2;
+                       
+        logger.debug(`Chat ${chat.name}: isGroup=${isGroup}, id=${chat.id?._serialized}`);
+        return isGroup;
+      });
       
       logger.info(`Found ${groups.length} groups after filtering`);
 
-      // עיבוד מקבילי של הקבוצות בקבוצות קטנות
-      const batchSize = 10;
-      const formattedGroups = [];
-      
-      for (let i = 0; i < groups.length; i += batchSize) {
-        const batch = groups.slice(i, i + batchSize);
-        const batchPromises = batch.map(async group => {
-          try {
-            // נסה לקבל מטא-דאטה רק אם צריך
-            let participantsCount = 0;
-            let name = group.name;
-            
-            if (!name || !participantsCount) {
-              try {
-                const metadata = await group.groupMetadata;
-                name = name || metadata?.subject;
-                participantsCount = metadata?.participants?.length;
-              } catch (err) {
-                logger.warn(`Failed to get metadata for group ${group.id._serialized}:`, err);
-              }
-            }
-
-            return {
-              id: group.id._serialized,
-              name: name || 'קבוצה ללא שם',
-              participantsCount: participantsCount || 0,
-              isReadOnly: group.isReadOnly || false,
-            };
-          } catch (error) {
-            logger.error(`Error processing group ${group.id._serialized}:`, error);
-            return null;
-          }
-        });
-
-        const batchResults = await Promise.all(batchPromises);
-        formattedGroups.push(...batchResults.filter(Boolean));
-        
-        // עדכון המטמון באופן הדרגתי
-        this.groupsCache.set(sessionId, formattedGroups);
-        this.lastGroupsFetch.set(sessionId, now);
-      }
+      // המרה למבנה הנדרש
+      const formattedGroups = await Promise.all(groups.map(async group => {
+        try {
+          const metadata = await group.groupMetadata;
+          return {
+            id: group.id._serialized,
+            name: group.name || metadata?.subject || 'קבוצה ללא שם',
+            participantsCount: metadata?.participants?.length || group.participants?.length || 0,
+            isReadOnly: group.isReadOnly || false,
+          };
+        } catch (error) {
+          logger.error(`Error getting metadata for group ${group.name}:`, error);
+          return {
+            id: group.id._serialized,
+            name: group.name || 'קבוצה ללא שם',
+            participantsCount: group.participants?.length || 0,
+            isReadOnly: group.isReadOnly || false,
+          };
+        }
+      }));
 
       logger.info(`Returning ${formattedGroups.length} formatted groups`);
       return formattedGroups;
@@ -582,46 +583,26 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      // בדיקה אם יש מידע במטמון
-      const cachedGroups = this.groupsCache.get(sessionId);
-      const basicInfo = cachedGroups?.find(g => g.id === groupId);
-
       const chat = await client.getChatById(groupId);
       if (!chat || !chat.isGroup) {
         throw new Error('Group not found');
       }
 
-      // קבלת מטא-דאטה שק אם צריך מידע נוסף
+      // קבלת מטא-דאטה של הקבוצה
       const metadata = await chat.groupMetadata;
       
-      const detailedInfo = {
+      return {
         id: chat.id._serialized,
-        name: basicInfo?.name || chat.name || metadata?.subject || 'קבוצה ללא שם',
-        participantsCount: metadata?.participants?.length || basicInfo?.participantsCount || 0,
+        name: chat.name || 'קבוצה ללא שם',
+        participantsCount: metadata?.participants?.length || 0,
         description: metadata?.desc || '',
         createdAt: metadata?.creation ? new Date(metadata.creation * 1000).toISOString() : null,
-        isReadOnly: basicInfo?.isReadOnly || chat.isReadOnly || false,
+        isReadOnly: chat.isReadOnly || false,
         participants: metadata?.participants?.map(p => ({
           id: p.id._serialized,
           isAdmin: p.isAdmin || false,
         })) || [],
       };
-
-      // עדכון המטמון עם המידע החדש
-      if (cachedGroups) {
-        const index = cachedGroups.findIndex(g => g.id === groupId);
-        if (index !== -1) {
-          cachedGroups[index] = {
-            ...cachedGroups[index],
-            name: detailedInfo.name,
-            participantsCount: detailedInfo.participantsCount,
-            isReadOnly: detailedInfo.isReadOnly,
-          };
-          this.groupsCache.set(sessionId, cachedGroups);
-        }
-      }
-
-      return detailedInfo;
     } catch (error) {
       logger.error(`Error getting group details for ${groupId}:`, error);
       throw error;
