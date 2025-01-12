@@ -388,11 +388,12 @@ class WhatsAppService {
       const chats = await client.getChats();
       logger.info(`Found ${chats.length} total chats`);
       
-      // סינון רק קבוצות
+      // סינון רבוצות לפי מספר מאפיינים
       const groups = chats.filter(chat => {
         const isGroup = chat.isGroup || 
                        chat.groupMetadata || 
-                       (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us'));
+                       (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us')) ||
+                       chat.participants?.length > 2;
                        
         logger.debug(`Chat ${chat.name}: isGroup=${isGroup}, id=${chat.id?._serialized}`);
         return isGroup;
@@ -400,21 +401,18 @@ class WhatsAppService {
       
       logger.info(`Found ${groups.length} groups after filtering`);
 
-      // המרה למבנה הנדרש עם קבלת מטא-דאטה לכל קבוצה
+      // המרה למבנה הנדרש
       const formattedGroups = await Promise.all(groups.map(async group => {
         try {
           const metadata = await group.groupMetadata;
-          logger.debug(`Group ${group.name} metadata:`, metadata);
-          
           return {
             id: group.id._serialized,
             name: group.name || metadata?.subject || 'קבוצה ללא שם',
-            participantsCount: metadata?.participants?.length || 0,
+            participantsCount: metadata?.participants?.length || group.participants?.length || 0,
             isReadOnly: group.isReadOnly || false,
           };
         } catch (error) {
           logger.error(`Error getting metadata for group ${group.name}:`, error);
-          // במקרה של שגיאה, ננסה לקבל את המידע ישירות מהאובייקט של הקבוצה
           return {
             id: group.id._serialized,
             name: group.name || 'קבוצה ללא שם',
