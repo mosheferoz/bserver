@@ -386,19 +386,26 @@ class WhatsAppService {
 
       // קבלת כל הצ'אטים
       const chats = await client.getChats();
+      logger.info(`Found ${chats.length} total chats`);
       
-      // סינון רק קבוצות וקבלת מידע בסיסי
-      const groups = chats
-        .filter(chat => chat.isGroup)
-        .map(group => ({
-          id: group.id._serialized,
-          name: group.name || 'קבוצה ללא שם',
-          participantsCount: group.participants?.length || 0,
-          isReadOnly: group.isReadOnly || false,
-        }));
+      // סינון רק קבוצות
+      const groups = chats.filter(chat => {
+        logger.debug(`Chat ${chat.name}: isGroup=${chat.isGroup}, type=${chat.type}`);
+        return chat.isGroup;
+      });
+      
+      logger.info(`Found ${groups.length} groups after filtering`);
 
-      logger.info(`Found ${groups.length} groups for session ${sessionId}`);
-      return groups;
+      // המרה למבנה הנדרש
+      const formattedGroups = groups.map(group => ({
+        id: group.id._serialized,
+        name: group.name || 'קבוצה ללא שם',
+        participantsCount: group.groupMetadata?.participants?.length || 0,
+        isReadOnly: group.isReadOnly || false,
+      }));
+
+      logger.info(`Returning ${formattedGroups.length} formatted groups`);
+      return formattedGroups;
     } catch (error) {
       logger.error(`Error getting groups for session ${sessionId}:`, error);
       throw error;
@@ -420,19 +427,20 @@ class WhatsAppService {
         throw new Error('Group not found');
       }
 
-      const participants = await chat.participants || [];
+      // קבלת מטא-דאטה של הקבוצה
+      const metadata = await chat.groupMetadata;
       
       return {
         id: chat.id._serialized,
         name: chat.name || 'קבוצה ללא שם',
-        participantsCount: participants.length,
-        description: chat.description || '',
-        createdAt: chat.createdAt ? new Date(chat.createdAt * 1000).toISOString() : null,
+        participantsCount: metadata?.participants?.length || 0,
+        description: metadata?.desc || '',
+        createdAt: metadata?.creation ? new Date(metadata.creation * 1000).toISOString() : null,
         isReadOnly: chat.isReadOnly || false,
-        participants: participants.map(p => ({
+        participants: metadata?.participants?.map(p => ({
           id: p.id._serialized,
           isAdmin: p.isAdmin || false,
-        })),
+        })) || [],
       };
     } catch (error) {
       logger.error(`Error getting group details for ${groupId}:`, error);
