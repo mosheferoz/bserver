@@ -459,23 +459,17 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      // קבלת כל הצ'אטים תחילה
-      const chats = await client.getChats();
-      const group = chats.find(chat => 
-        chat.id._serialized === groupId || 
-        (chat.id && chat.id._serialized && chat.id._serialized.includes(groupId))
-      );
-
-      if (!group) {
-        logger.warn(`Group ${groupId} not found in chats list`);
+      // קבלת הצ'אט הספציפי ישירות
+      const chat = await client.getChatById(groupId);
+      if (!chat) {
+        logger.warn(`Group ${groupId} not found`);
         throw new Error('Group not found');
       }
 
       // בדיקה אם זו קבוצה
-      const isGroup = group.isGroup || 
-                     group.groupMetadata || 
-                     (group.id && group.id._serialized && group.id._serialized.includes('@g.us')) ||
-                     group.participants?.length > 2;
+      const isGroup = chat.isGroup || 
+                     chat.groupMetadata || 
+                     (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us'));
 
       if (!isGroup) {
         logger.warn(`Chat ${groupId} is not a group`);
@@ -485,23 +479,32 @@ class WhatsAppService {
       // קבלת מטא-דאטה של הקבוצה
       let metadata;
       try {
-        metadata = await group.groupMetadata;
+        metadata = await chat.groupMetadata;
+        logger.info(`Got metadata for group ${groupId}: ${JSON.stringify(metadata)}`);
       } catch (error) {
         logger.warn(`Failed to get metadata for group ${groupId}:`, error);
-        // נמשיך גם אם אין מטא-דאטה
+      }
+
+      // קבלת המשתתפים
+      let participants = [];
+      try {
+        participants = await chat.participants || [];
+        logger.info(`Got ${participants.length} participants for group ${groupId}`);
+      } catch (error) {
+        logger.warn(`Failed to get participants for group ${groupId}:`, error);
       }
       
       return {
-        id: group.id._serialized,
-        name: group.name || metadata?.subject || 'קבוצה ללא שם',
-        participantsCount: metadata?.participants?.length || group.participants?.length || 0,
+        id: chat.id._serialized,
+        name: chat.name || metadata?.subject || 'קבוצה ללא שם',
+        participantsCount: participants.length,
         description: metadata?.desc || '',
         createdAt: metadata?.creation ? new Date(metadata.creation * 1000).toISOString() : null,
-        isReadOnly: group.isReadOnly || false,
-        participants: metadata?.participants?.map(p => ({
+        isReadOnly: chat.isReadOnly || false,
+        participants: participants.map(p => ({
           id: p.id._serialized,
           isAdmin: p.isAdmin || false,
-        })) || [],
+        })),
         isConnected: true,
         error: null
       };
