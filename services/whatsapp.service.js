@@ -14,26 +14,100 @@ class WhatsAppService {
     this.qrCodes = new Map();
     this.isConnected = new Map();
     this.isInitializing = new Map();
-    this.lastStatusCheck = new Map();
     this.authPath = path.join(__dirname, '../whatsapp-auth');
   }
 
   async cleanupAuthFolder(sessionId) {
     try {
+      logger.info(`Starting auth folder cleanup for session ${sessionId}...`);
       const sessionPath = path.join(this.authPath, `session-${sessionId}`);
-      if (fs.existsSync(sessionPath)) {
-        await fs.promises.rm(sessionPath, { recursive: true, force: true });
-        logger.info(`Cleaned up auth folder for session ${sessionId}`);
+
+      if (this.clients.has(sessionId)) {
+        try {
+          const client = this.clients.get(sessionId);
+          if (client) {
+            // נסה לנתק את הלקוח בצורה מסודרת
+            try {
+              await client.logout();
+            } catch (logoutErr) {
+              logger.warn('Error during logout:', logoutErr);
+            }
+            
+            try {
+              await client.destroy();
+            } catch (destroyErr) {
+              logger.warn('Error during client destroy:', destroyErr);
+            }
+            
+            this.clients.delete(sessionId);
+            logger.info(`Existing client destroyed for session ${sessionId}`);
+          }
+          
+          // המתן קצת לפני המשך הניקוי
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        } catch (err) {
+          logger.warn('Error cleaning up client:', err);
+        }
       }
-      
-      // נקה את כל המידע הקשור לסשן
-      this.clients.delete(sessionId);
-      this.qrCodes.delete(sessionId);
-      this.isConnected.set(sessionId, false);
-      this.isInitializing.delete(sessionId);
-      this.lastStatusCheck.delete(sessionId);
+
+      // מחיקת תיקיית המטמון בנפרד
+      const cachePath = path.join(sessionPath, 'session-' + sessionId, 'Default', 'Cache');
+      if (fs.existsSync(cachePath)) {
+        try {
+          await rimraf(cachePath, { 
+            maxRetries: 5,
+            recursive: true,
+            force: true 
+          });
+          logger.info('Cache folder removed successfully');
+        } catch (cacheErr) {
+          logger.warn('Error removing cache folder:', cacheErr);
+        }
+      }
+
+      // מחיקת תיקיית הסשן
+      if (fs.existsSync(sessionPath)) {
+        try {
+          await rimraf(sessionPath, { 
+            maxRetries: 5,
+            recursive: true,
+            force: true,
+            retryDelay: 1000
+          });
+          logger.info('Session folder removed successfully');
+        } catch (sessionErr) {
+          logger.warn('Error removing session folder:', sessionErr);
+          
+          // אם נכשל, ננסה למחוק קבצים בודדים
+          try {
+            const files = await fs.readdir(sessionPath, { recursive: true });
+            for (const file of files) {
+              const filePath = path.join(sessionPath, file);
+              try {
+                await fs.remove(filePath);
+              } catch (fileErr) {
+                logger.warn(`Failed to remove file ${filePath}:`, fileErr);
+              }
+            }
+          } catch (readErr) {
+            logger.warn('Error reading session directory:', readErr);
+          }
+        }
+      }
+
+      // יצירת תיקייה חדשה
+      try {
+        await fs.ensureDir(sessionPath);
+        logger.info('Session folder recreated');
+      } catch (mkdirErr) {
+        logger.warn('Error creating new session folder:', mkdirErr);
+      }
+
+      // המתנה נוספת לפני סיום
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (error) {
-      logger.error(`Error cleaning up auth folder for session ${sessionId}:`, error);
+      logger.error('Error in cleanupAuthFolder:', error);
+      throw error;
     }
   }
 
@@ -156,36 +230,6 @@ class WhatsAppService {
   }
 
   getStatus(sessionId) {
-    const now = Date.now();
-    const lastCheck = this.lastStatusCheck.get(sessionId) || 0;
-    
-    // אם עברו פחות מ-2 שניות מהבדיקה האחרונה, החזר את התוצאה הקודמת
-    if (now - lastCheck < 2000) {
-      return {
-        connected: this.isConnected.get(sessionId) || false,
-        hasQR: this.qrCodes.has(sessionId)
-      };
-    }
-
-    // עדכן את זמן הבדיקה האחרונה
-    this.lastStatusCheck.set(sessionId, now);
-
-    // בדוק אם הקליינט קיים ומחובר
-    const client = this.clients.get(sessionId);
-    const isClientConnected = client?.pupPage && !client?.pupPage?.isClosed();
-
-    // עדכן את סטטוס החיבור בהתאם
-    if (!isClientConnected && this.isConnected.get(sessionId)) {
-      this.isConnected.set(sessionId, false);
-      this.qrCodes.delete(sessionId);
-      
-      // אם הקליינט לא מחובר, נקה אותו
-      if (client) {
-        client.destroy().catch(console.error);
-        this.clients.delete(sessionId);
-      }
-    }
-
     return {
       connected: this.isConnected.get(sessionId) || false,
       hasQR: this.qrCodes.has(sessionId)
