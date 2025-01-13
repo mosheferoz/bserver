@@ -15,27 +15,6 @@ class WhatsAppService {
     this.isConnected = new Map();
     this.isInitializing = new Map();
     this.authPath = path.join(__dirname, '../whatsapp-auth');
-    this.io = null;
-  }
-
-  setSocketIO(io) {
-    this.io = io;
-  }
-
-  emitGroupUpdate(sessionId, group) {
-    if (this.io) {
-      this.io.to(`whatsapp_${sessionId}`).emit('group_update', group);
-    }
-  }
-
-  emitGroupStatusChange(sessionId, groupId, isConnected, error = null) {
-    if (this.io) {
-      this.io.to(`whatsapp_${sessionId}`).emit('group_status_change', {
-        groupId,
-        isConnected,
-        error
-      });
-    }
   }
 
   async cleanupAuthFolder(sessionId) {
@@ -445,27 +424,20 @@ class WhatsAppService {
       const formattedGroups = await Promise.all(groups.map(async group => {
         try {
           const metadata = await group.groupMetadata;
-          const formattedGroup = {
+          return {
             id: group.id._serialized,
             name: group.name || metadata?.subject || 'קבוצה ללא שם',
             participantsCount: metadata?.participants?.length || group.participants?.length || 0,
             isReadOnly: group.isReadOnly || false,
-            isConnected: true,
           };
-          this.emitGroupUpdate(sessionId, formattedGroup);
-          return formattedGroup;
         } catch (error) {
           logger.error(`Error getting metadata for group ${group.name}:`, error);
-          const formattedGroup = {
+          return {
             id: group.id._serialized,
             name: group.name || 'קבוצה ללא שם',
             participantsCount: group.participants?.length || 0,
             isReadOnly: group.isReadOnly || false,
-            isConnected: false,
-            error: error.message,
           };
-          this.emitGroupUpdate(sessionId, formattedGroup);
-          return formattedGroup;
         }
       }));
 
@@ -484,9 +456,7 @@ class WhatsAppService {
       
       const client = this.clients.get(sessionId);
       if (!client) {
-        const error = 'WhatsApp client not found';
-        this.emitGroupStatusChange(sessionId, groupId, false, error);
-        throw new Error(error);
+        throw new Error('WhatsApp client not found');
       }
 
       // קבלת כל הצ'אטים תחילה
@@ -497,9 +467,8 @@ class WhatsAppService {
       );
 
       if (!group) {
-        const error = 'Group not found';
-        this.emitGroupStatusChange(sessionId, groupId, false, error);
-        throw new Error(error);
+        logger.warn(`Group ${groupId} not found in chats list`);
+        throw new Error('Group not found');
       }
 
       // בדיקה אם זו קבוצה
@@ -509,9 +478,8 @@ class WhatsAppService {
                      group.participants?.length > 2;
 
       if (!isGroup) {
-        const error = 'Not a group chat';
-        this.emitGroupStatusChange(sessionId, groupId, false, error);
-        throw new Error(error);
+        logger.warn(`Chat ${groupId} is not a group`);
+        throw new Error('Not a group chat');
       }
 
       // קבלת מטא-דאטה של הקבוצה
@@ -520,9 +488,10 @@ class WhatsAppService {
         metadata = await group.groupMetadata;
       } catch (error) {
         logger.warn(`Failed to get metadata for group ${groupId}:`, error);
+        // נמשיך גם אם אין מטא-דאטה
       }
       
-      const groupDetails = {
+      return {
         id: group.id._serialized,
         name: group.name || metadata?.subject || 'קבוצה ללא שם',
         participantsCount: metadata?.participants?.length || group.participants?.length || 0,
@@ -536,12 +505,8 @@ class WhatsAppService {
         isConnected: true,
         error: null
       };
-
-      this.emitGroupUpdate(sessionId, groupDetails);
-      return groupDetails;
     } catch (error) {
       logger.error(`Error getting group details for ${groupId}:`, error);
-      this.emitGroupStatusChange(sessionId, groupId, false, error.message);
       throw error;
     }
   }

@@ -9,7 +9,6 @@ const logger = require('./logger');
 const rateLimiter = require('./middleware/rateLimiter');
 const scraperRoutes = require('./routes/scraper.routes');
 const whatsappService = require('./services/whatsapp.service');
-const whatsappRoutes = require('./routes/whatsapp.routes');
 
 // יצירת אפליקציית Express
 const app = express();
@@ -40,7 +39,7 @@ app.use(rateLimiter);
 
 // נתיבים
 app.use('/api/scraper', scraperRoutes);
-app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/whatsapp', require('./routes/whatsapp.routes'));
 
 // נתיב בדיקת בריאות
 app.use('/api/health', (req, res) => {
@@ -128,20 +127,3 @@ const startServer = async (retries = 3) => {
     process.exit(1);
   }
 };
-
-// הגדרת Socket.IO
-io.on('connection', (socket) => {
-  logger.info('New client connected');
-
-  socket.on('join_whatsapp_room', (sessionId) => {
-    logger.info(`Client joined WhatsApp room for session ${sessionId}`);
-    socket.join(`whatsapp_${sessionId}`);
-  });
-
-  socket.on('disconnect', () => {
-    logger.info('Client disconnected');
-  });
-});
-
-// הגדרת Socket.IO בשירות WhatsApp
-whatsappService.setSocketIO(io);
