@@ -22,70 +22,96 @@ class WhatsAppService {
       logger.info(`Starting auth folder cleanup for session ${sessionId}...`);
       const sessionPath = path.join(this.authPath, `session-${sessionId}`);
 
+      // נסה לנתק את הלקוח בצורה מסודרת
       if (this.clients.has(sessionId)) {
-        try {
-          const client = this.clients.get(sessionId);
-          if (client) {
-            try {
-              await client.logout();
-            } catch (logoutErr) {
-              logger.warn('Error during logout:', logoutErr);
-            }
-            
-            try {
-              await client.destroy();
-            } catch (destroyErr) {
-              logger.warn('Error during client destroy:', destroyErr);
-            }
-            
+        const client = this.clients.get(sessionId);
+        if (client) {
+          try {
+            // נסה לנתק בצורה מסודרת
+            await client.logout().catch(err => logger.warn('Logout error:', err));
+            await client.destroy().catch(err => logger.warn('Destroy error:', err));
+          } catch (err) {
+            logger.warn('Client cleanup error:', err);
+          } finally {
+            // תמיד נקה את המשאבים
             this.clients.delete(sessionId);
             this.qrCodes.delete(sessionId);
             this.isConnected.set(sessionId, false);
-            logger.info(`Existing client destroyed for session ${sessionId}`);
+            logger.info(`Client resources cleaned for session ${sessionId}`);
           }
-        } catch (err) {
-          logger.warn('Error cleaning up client:', err);
         }
       }
 
       // המתנה לפני המשך הניקוי
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       if (fs.existsSync(sessionPath)) {
         try {
-          // מחיקה רקורסיבית של כל התיקיות והקבצים
-          const deleteFolderRecursive = async (folderPath) => {
-            if (fs.existsSync(folderPath)) {
-              for (const entry of fs.readdirSync(folderPath)) {
-                const curPath = path.join(folderPath, entry);
-                if (fs.lstatSync(curPath).isDirectory()) {
-                  await deleteFolderRecursive(curPath);
-                } else {
-                  try {
-                    fs.unlinkSync(curPath);
-                  } catch (err) {
-                    logger.warn(`Failed to delete file ${curPath}:`, err);
-                  }
-                }
-              }
+          // נסה למחוק קודם את הקבצים הבעייתיים
+          const problematicPaths = [
+            path.join(sessionPath, `session-${sessionId}`, 'Default', 'IndexedDB'),
+            path.join(sessionPath, `session-${sessionId}`, 'Default', 'Cache'),
+            path.join(sessionPath, `session-${sessionId}`, 'Default', 'Service Worker')
+          ];
+
+          for (const dirPath of problematicPaths) {
+            if (fs.existsSync(dirPath)) {
               try {
-                fs.rmdirSync(folderPath);
+                // נסה למחוק עם rimraf
+                await rimraf(dirPath, { 
+                  maxRetries: 5,
+                  recursive: true,
+                  force: true,
+                  retryDelay: 1000
+                });
               } catch (err) {
-                logger.warn(`Failed to delete folder ${folderPath}:`, err);
-                // אם נכשל, ננסה למחוק עם rimraf
+                logger.warn(`Failed to remove directory ${dirPath}:`, err);
+                // אם נכשל, נסה למחוק קבצים בודדים
                 try {
-                  await rimraf(folderPath, { maxRetries: 3, recursive: true, force: true });
-                } catch (rimrafErr) {
-                  logger.warn(`Failed to delete folder with rimraf ${folderPath}:`, rimrafErr);
+                  const files = fs.readdirSync(dirPath);
+                  for (const file of files) {
+                    const filePath = path.join(dirPath, file);
+                    try {
+                      if (fs.lstatSync(filePath).isDirectory()) {
+                        await rimraf(filePath, { maxRetries: 3, recursive: true, force: true });
+                      } else {
+                        fs.unlinkSync(filePath);
+                      }
+                    } catch (fileErr) {
+                      logger.warn(`Failed to remove path ${filePath}:`, fileErr);
+                    }
+                  }
+                } catch (readErr) {
+                  logger.warn(`Failed to read directory ${dirPath}:`, readErr);
                 }
               }
             }
-          };
+          }
 
-          await deleteFolderRecursive(sessionPath);
+          // המתנה נוספת אחרי מחיקת הקבצים הבעייתיים
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          // עכשיו נסה למחוק את כל התיקייה
+          await rimraf(sessionPath, { 
+            maxRetries: 5,
+            recursive: true,
+            force: true,
+            retryDelay: 1000
+          });
+          
           logger.info('Session folder removed successfully');
         } catch (err) {
           logger.error('Error removing session folder:', err);
+          // אם נכשלנו במחיקה, ננסה לפחות ליצור תיקייה נקייה
+          try {
+            const newSessionPath = path.join(this.authPath, `session-${sessionId}-${Date.now()}`);
+            await fs.promises.mkdir(newSessionPath, { recursive: true });
+            logger.info(`Created new session folder at ${newSessionPath}`);
+            return newSessionPath;
+          } catch (mkdirErr) {
+            logger.error('Failed to create new session folder:', mkdirErr);
+            throw mkdirErr;
+          }
         }
       }
 
@@ -93,8 +119,10 @@ class WhatsAppService {
       try {
         await fs.promises.mkdir(sessionPath, { recursive: true });
         logger.info('Session folder recreated');
+        return sessionPath;
       } catch (mkdirErr) {
-        logger.warn('Error creating new session folder:', mkdirErr);
+        logger.error('Error creating new session folder:', mkdirErr);
+        throw mkdirErr;
       }
 
     } catch (error) {
@@ -114,14 +142,13 @@ class WhatsAppService {
       this.isConnected.set(sessionId, false);
       logger.info(`Starting WhatsApp client initialization for session ${sessionId}...`);
 
-      await this.cleanupAuthFolder(sessionId);
-      const sessionPath = path.join(this.authPath, `session-${sessionId}`);
-
+      const sessionPath = await this.cleanupAuthFolder(sessionId);
+      
       const client = new Client({
         restartOnAuthFail: true,
         authStrategy: new LocalAuth({
           clientId: sessionId,
-          dataPath: sessionPath
+          dataPath: path.dirname(sessionPath)
         }),
         puppeteer: {
           headless: true,
