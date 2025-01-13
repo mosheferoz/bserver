@@ -459,25 +459,51 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      const chat = await client.getChatById(groupId);
-      if (!chat || !chat.isGroup) {
+      // קבלת כל הצ'אטים תחילה
+      const chats = await client.getChats();
+      const group = chats.find(chat => 
+        chat.id._serialized === groupId || 
+        (chat.id && chat.id._serialized && chat.id._serialized.includes(groupId))
+      );
+
+      if (!group) {
+        logger.warn(`Group ${groupId} not found in chats list`);
         throw new Error('Group not found');
       }
 
+      // בדיקה אם זו קבוצה
+      const isGroup = group.isGroup || 
+                     group.groupMetadata || 
+                     (group.id && group.id._serialized && group.id._serialized.includes('@g.us')) ||
+                     group.participants?.length > 2;
+
+      if (!isGroup) {
+        logger.warn(`Chat ${groupId} is not a group`);
+        throw new Error('Not a group chat');
+      }
+
       // קבלת מטא-דאטה של הקבוצה
-      const metadata = await chat.groupMetadata;
+      let metadata;
+      try {
+        metadata = await group.groupMetadata;
+      } catch (error) {
+        logger.warn(`Failed to get metadata for group ${groupId}:`, error);
+        // נמשיך גם אם אין מטא-דאטה
+      }
       
       return {
-        id: chat.id._serialized,
-        name: chat.name || 'קבוצה ללא שם',
-        participantsCount: metadata?.participants?.length || 0,
+        id: group.id._serialized,
+        name: group.name || metadata?.subject || 'קבוצה ללא שם',
+        participantsCount: metadata?.participants?.length || group.participants?.length || 0,
         description: metadata?.desc || '',
         createdAt: metadata?.creation ? new Date(metadata.creation * 1000).toISOString() : null,
-        isReadOnly: chat.isReadOnly || false,
+        isReadOnly: group.isReadOnly || false,
         participants: metadata?.participants?.map(p => ({
           id: p.id._serialized,
           isAdmin: p.isAdmin || false,
         })) || [],
+        isConnected: true,
+        error: null
       };
     } catch (error) {
       logger.error(`Error getting group details for ${groupId}:`, error);
