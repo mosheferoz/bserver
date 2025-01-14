@@ -459,20 +459,15 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      // קבלת הצ'אט הספציפי ישירות
+      // קבלת הצ'אט הספציפי
       const chat = await client.getChatById(groupId);
       if (!chat) {
         logger.warn(`Group ${groupId} not found`);
         throw new Error('Group not found');
       }
 
-      // בדיקה מורחבת אם זו קבוצה
-      const isGroup = chat.isGroup || 
-                     chat.groupMetadata || 
-                     (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us')) ||
-                     chat.participants?.length > 2;
-
-      if (!isGroup) {
+      // בדיקה שזו קבוצה
+      if (!chat.isGroup) {
         logger.warn(`Chat ${groupId} is not a group`);
         throw new Error('Not a group chat');
       }
@@ -484,77 +479,40 @@ class WhatsAppService {
       let isReadOnly = chat.isReadOnly || false;
 
       try {
-        // נסיון ראשון - שימוש ב-fetchGroupMetadata
-        logger.info('Attempting to fetch group metadata...');
-        const metadata = await client.groupMetadata(groupId);
+        // קבלת מטא-דאטה של הקבוצה
+        const metadata = await chat.getMetadata();
         if (metadata) {
           logger.info('Successfully fetched group metadata');
-          groupName = metadata.subject || groupName;
+          groupName = metadata.name || groupName;
           groupDesc = metadata.desc || '';
           groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
-          
-          if (metadata.participants && Array.isArray(metadata.participants)) {
-            participants = metadata.participants.map(p => ({
-              id: (p.id?.user || p.id?.split('@')[0] || p.id || '').toString(),
-              isAdmin: p.isAdmin || p.isSuperAdmin || false
-            }));
-          }
         }
       } catch (metadataError) {
         logger.warn(`Failed to fetch group metadata: ${metadataError.message}`);
+      }
+
+      try {
+        // קבלת משתתפי הקבוצה
+        const participantsList = await chat.participants;
+        if (participantsList && Array.isArray(participantsList)) {
+          participants = participantsList.map(p => ({
+            id: (p.id._serialized?.split('@')[0] || p.id.user || '').toString(),
+            isAdmin: p.isAdmin || false
+          }));
+          logger.info(`Found ${participants.length} participants`);
+        }
+      } catch (participantsError) {
+        logger.warn(`Failed to get participants: ${participantsError.message}`);
         
+        // נסיון נוסף - שימוש ב-getParticipants
         try {
-          // נסיון שני - שימוש ב-groupMetadata של הצ'אט
-          logger.info('Attempting to get metadata from chat...');
-          const chatMetadata = await chat.groupMetadata;
-          if (chatMetadata) {
-            logger.info('Successfully got metadata from chat');
-            groupName = chatMetadata.subject || groupName;
-            groupDesc = chatMetadata.desc || '';
-            groupCreatedAt = chatMetadata.creation ? new Date(chatMetadata.creation * 1000).toISOString() : null;
-            
-            if (chatMetadata.participants && Array.isArray(chatMetadata.participants)) {
-              participants = chatMetadata.participants.map(p => ({
-                id: (p.id?.user || p.id?.split('@')[0] || p.id || '').toString(),
-                isAdmin: p.isAdmin || p.isSuperAdmin || false
-              }));
-            }
-          }
-        } catch (chatMetadataError) {
-          logger.warn(`Failed to get metadata from chat: ${chatMetadataError.message}`);
-        }
-      }
-
-      // נסיון שלישי - שימוש במשתתפים של הצ'אט
-      if (participants.length === 0 && chat.participants) {
-        logger.info('Attempting to get participants from chat...');
-        try {
-          if (Array.isArray(chat.participants)) {
-            participants = chat.participants.map(p => ({
-              id: (p.id?.user || p.id?.split('@')[0] || p.id || '').toString(),
-              isAdmin: p.isAdmin || false
-            }));
-          } else if (typeof chat.participants === 'object') {
-            participants = Object.values(chat.participants).map(p => ({
-              id: (p.id?.user || p.id?.split('@')[0] || p.id || '').toString(),
-              isAdmin: p.isAdmin || false
-            }));
-          }
-        } catch (participantsError) {
-          logger.warn(`Failed to get participants from chat: ${participantsError.message}`);
-        }
-      }
-
-      // נסיון רביעי - שימוש ב-fetchParticipants
-      if (participants.length === 0) {
-        logger.info('Attempting to fetch participants directly...');
-        try {
-          const fetchedParticipants = await chat.fetchParticipants();
-          if (Array.isArray(fetchedParticipants)) {
+          const fetchedParticipants = await chat.getParticipants();
+          if (fetchedParticipants && Array.isArray(fetchedParticipants)) {
             participants = fetchedParticipants.map(p => ({
-              id: (p.id?.user || p.id?.split('@')[0] || p.id || '').toString(),
+              id: (p.id._serialized?.split('@')[0] || p.id.user || '').toString(),
               isAdmin: p.isAdmin || false
             }));
+            logger.info(`Found ${participants.length} participants using getParticipants`);
           }
         } catch (fetchError) {
           logger.warn(`Failed to fetch participants: ${fetchError.message}`);
@@ -570,6 +528,10 @@ class WhatsAppService {
 
       logger.info(`Final participants count: ${participants.length}`);
       
+      if (participants.length === 0) {
+        logger.warn(`No participants found for group ${groupId}`);
+      }
+
       return {
         id: chat.id._serialized,
         name: groupName,
