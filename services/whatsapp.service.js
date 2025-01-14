@@ -466,8 +466,15 @@ class WhatsAppService {
         throw new Error('Group not found');
       }
 
-      // בדיקה שזו קבוצה
-      if (!chat.isGroup) {
+      // בדיקה מורחבת אם זו קבוצה
+      const isGroup = chat.isGroup || 
+                     chat.groupMetadata || 
+                     (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us')) ||
+                     chat.participants?.length > 2;
+                     
+      logger.debug(`Chat ${chat.name}: isGroup=${isGroup}, id=${chat.id?._serialized}`);
+      
+      if (!isGroup) {
         logger.warn(`Chat ${groupId} is not a group`);
         throw new Error('Not a group chat');
       }
@@ -480,42 +487,46 @@ class WhatsAppService {
 
       try {
         // קבלת מטא-דאטה של הקבוצה
-        const metadata = await chat.getMetadata();
+        logger.info('Attempting to fetch group metadata...');
+        const metadata = await chat.groupMetadata;
         if (metadata) {
           logger.info('Successfully fetched group metadata');
-          groupName = metadata.name || groupName;
+          groupName = metadata.subject || metadata.name || groupName;
           groupDesc = metadata.desc || '';
           groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
+          
+          if (metadata.participants && Array.isArray(metadata.participants)) {
+            participants = metadata.participants.map(p => ({
+              id: (p.id?.user || p.id?.split('@')[0] || p.id || '').toString(),
+              isAdmin: p.isAdmin || p.isSuperAdmin || false
+            }));
+            logger.info(`Found ${participants.length} participants from metadata`);
+          }
         }
       } catch (metadataError) {
         logger.warn(`Failed to fetch group metadata: ${metadataError.message}`);
       }
 
-      try {
-        // קבלת משתתפי הקבוצה
-        const participantsList = await chat.participants;
-        if (participantsList && Array.isArray(participantsList)) {
-          participants = participantsList.map(p => ({
-            id: (p.id._serialized?.split('@')[0] || p.id.user || '').toString(),
-            isAdmin: p.isAdmin || false
-          }));
-          logger.info(`Found ${participants.length} participants`);
-        }
-      } catch (participantsError) {
-        logger.warn(`Failed to get participants: ${participantsError.message}`);
-        
-        // נסיון נוסף - שימוש ב-getParticipants
+      // אם אין משתתפים ממטא-דאטה, ננסה לקבל ישירות מהצ'אט
+      if (participants.length === 0) {
         try {
-          const fetchedParticipants = await chat.getParticipants();
-          if (fetchedParticipants && Array.isArray(fetchedParticipants)) {
-            participants = fetchedParticipants.map(p => ({
-              id: (p.id._serialized?.split('@')[0] || p.id.user || '').toString(),
-              isAdmin: p.isAdmin || false
-            }));
-            logger.info(`Found ${participants.length} participants using getParticipants`);
+          logger.info('Attempting to get participants directly from chat...');
+          if (chat.participants) {
+            if (Array.isArray(chat.participants)) {
+              participants = chat.participants.map(p => ({
+                id: (p.id?._serialized?.split('@')[0] || p.id?.user || p.id || '').toString(),
+                isAdmin: p.isAdmin || false
+              }));
+            } else if (typeof chat.participants === 'object') {
+              participants = Object.values(chat.participants).map(p => ({
+                id: (p.id?._serialized?.split('@')[0] || p.id?.user || p.id || '').toString(),
+                isAdmin: p.isAdmin || false
+              }));
+            }
+            logger.info(`Found ${participants.length} participants from chat`);
           }
-        } catch (fetchError) {
-          logger.warn(`Failed to fetch participants: ${fetchError.message}`);
+        } catch (participantsError) {
+          logger.warn(`Failed to get participants from chat: ${participantsError.message}`);
         }
       }
 
