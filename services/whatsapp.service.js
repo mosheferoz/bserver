@@ -466,8 +466,13 @@ class WhatsAppService {
         throw new Error('Group not found');
       }
 
-      // בדיקה אם זו קבוצה
-      if (!chat.isGroup) {
+      // בדיקה מורחבת אם זו קבוצה
+      const isGroup = chat.isGroup || 
+                     chat.groupMetadata || 
+                     (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us')) ||
+                     chat.participants?.length > 2;
+
+      if (!isGroup) {
         logger.warn(`Chat ${groupId} is not a group`);
         throw new Error('Not a group chat');
       }
@@ -478,10 +483,29 @@ class WhatsAppService {
         logger.info(`Got metadata for group ${groupId}`);
 
         // קבלת כל המשתתפים בקבוצה
-        const participants = metadata.participants.map(participant => ({
-          id: participant.id.split('@')[0], // רק המספר, בלי ה-@c.us
-          isAdmin: participant.isAdmin || participant.isSuperAdmin
-        }));
+        const participants = metadata.participants.map(participant => {
+          let participantId;
+          try {
+            // ניסיון לחלץ את המספר בכמה דרכים
+            if (typeof participant.id === 'string') {
+              participantId = participant.id.split('@')[0];
+            } else if (participant.id && participant.id.user) {
+              participantId = participant.id.user;
+            } else if (participant.id && participant.id._serialized) {
+              participantId = participant.id._serialized.split('@')[0];
+            } else {
+              participantId = 'unknown';
+            }
+          } catch (err) {
+            logger.warn(`Error extracting participant ID: ${err}`);
+            participantId = 'unknown';
+          }
+
+          return {
+            id: participantId,
+            isAdmin: participant.isAdmin || participant.isSuperAdmin || false
+          };
+        });
 
         logger.info(`Got ${participants.length} participants for group ${groupId}`);
         
@@ -500,10 +524,33 @@ class WhatsAppService {
         logger.error(`Error getting metadata for group ${groupId}:`, metadataError);
         
         // נסה לקבל את המשתתפים ישירות מהצ'אט
-        const participants = chat.participants?.map(participant => ({
-          id: participant.id.split('@')[0],
-          isAdmin: participant.isAdmin || false
-        })) || [];
+        let participants = [];
+        try {
+          participants = (chat.participants || []).map(participant => {
+            let participantId;
+            try {
+              if (typeof participant.id === 'string') {
+                participantId = participant.id.split('@')[0];
+              } else if (participant.id && participant.id.user) {
+                participantId = participant.id.user;
+              } else if (participant.id && participant.id._serialized) {
+                participantId = participant.id._serialized.split('@')[0];
+              } else {
+                participantId = 'unknown';
+              }
+            } catch (err) {
+              logger.warn(`Error extracting participant ID: ${err}`);
+              participantId = 'unknown';
+            }
+
+            return {
+              id: participantId,
+              isAdmin: participant.isAdmin || false
+            };
+          });
+        } catch (participantsError) {
+          logger.error(`Error getting participants from chat: ${participantsError}`);
+        }
 
         return {
           id: chat.id._serialized,

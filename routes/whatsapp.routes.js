@@ -362,6 +362,17 @@ router.get('/groups/:sessionId/:groupId', async (req, res) => {
 
     try {
       const groupDetails = await whatsappService.getGroupDetails(sessionId, groupId);
+      
+      // בדיקה נוספת שיש לנו מידע תקין
+      if (!groupDetails || !groupDetails.id) {
+        throw new Error('Invalid group details received');
+      }
+      
+      // בדיקה שיש לנו משתתפים
+      if (!groupDetails.participants || groupDetails.participants.length === 0) {
+        logger.warn(`No participants found for group ${groupId}`);
+      }
+      
       res.json({ group: groupDetails });
     } catch (groupError) {
       logger.error(`Error getting group details: ${groupError.message}`);
