@@ -612,47 +612,6 @@ class WhatsAppService {
       throw error;
     }
   }
-
-  async exportGroupToStorage(sessionId, groupId) {
-    try {
-      logger.info(`Exporting group ${groupId} to storage for session ${sessionId}`);
-      
-      // קבלת פרטי הקבוצה
-      const groupDetails = await this.getGroupDetails(sessionId, groupId);
-      
-      if (!groupDetails.participants || groupDetails.participants.length === 0) {
-        throw new Error('לא נמצאו משתתפים בקבוצה');
-      }
-
-      // יצירת תוכן ה-CSV
-      const headers = ['מספר טלפון', 'סטטוס ניהול'];
-      const rows = groupDetails.participants.map(p => [
-        p.id,
-        p.isAdmin ? 'מנהל' : 'חבר'
-      ]);
-      
-      // המרה למחרוזת CSV
-      const csvContent = [
-        headers.join('\t'),
-        ...rows.map(row => row.join('\t'))
-      ].join('\n');
-
-      // יצירת שם הקובץ
-      const fileName = `${groupDetails.name.replace(/[^a-zA-Z0-9\u0590-\u05FF]/g, '_')}_${Date.now()}.csv`;
-      
-      return {
-        name: fileName,
-        content: csvContent,
-        type: 'csv',
-        rowCount: rows.length,
-        groupName: groupDetails.name
-      };
-      
-    } catch (error) {
-      logger.error(`Error exporting group ${groupId} to storage:`, error);
-      throw error;
-    }
-  }
 }
 
 module.exports = new WhatsAppService(); 

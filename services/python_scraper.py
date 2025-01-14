@@ -53,11 +53,29 @@ def scrape_event_data(url):
             if '05:30' in element or '23:30' in element:
                 date_text = element.strip()
                 break
+
+        print("Extracting description...", file=sys.stderr)
+        description = ""
+        main_content = soup.find('div', {'class': 'event-description'}) or soup.find('div', {'class': 'description'})
+        
+        if main_content:
+            # מחפש את כל הטקסט בתוך האלמנט
+            description = main_content.get_text(separator='\n', strip=True)
+        else:
+            # אם לא מצאנו את האלמנט הספציפי, ננסה למצוא טקסט משמעותי בדף
+            content_blocks = []
+            for p in soup.find_all(['p', 'div']):
+                text = p.get_text(strip=True)
+                if len(text) > 100:  # מחפש בלוקים של טקסט משמעותיים
+                    content_blocks.append(text)
+            if content_blocks:
+                description = '\n\n'.join(content_blocks)
         
         result = {
             "eventName": _cleanEventName(title),
             "imageUrl": image,
             "eventDate": date_text,
+            "description": description,
             "url": url
         }
         
