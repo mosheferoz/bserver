@@ -472,29 +472,51 @@ class WhatsAppService {
         throw new Error('Not a group chat');
       }
 
-      // קבלת מטא-דאטה של הקבוצה
-      const metadata = await chat.groupMetadata;
-      logger.info(`Got metadata for group ${groupId}`);
+      try {
+        // קבלת מטא-דאטה של הקבוצה
+        const metadata = await chat.groupMetadata;
+        logger.info(`Got metadata for group ${groupId}`);
 
-      // קבלת כל המשתתפים בקבוצה
-      const participants = metadata.participants.map(participant => ({
-        id: participant.id.user, // רק המספר, בלי ה-@c.us
-        isAdmin: participant.isAdmin || participant.isSuperAdmin
-      }));
+        // קבלת כל המשתתפים בקבוצה
+        const participants = metadata.participants.map(participant => ({
+          id: participant.id.split('@')[0], // רק המספר, בלי ה-@c.us
+          isAdmin: participant.isAdmin || participant.isSuperAdmin
+        }));
 
-      logger.info(`Got ${participants.length} participants for group ${groupId}`);
-      
-      return {
-        id: chat.id._serialized,
-        name: metadata.subject || chat.name || 'קבוצה ללא שם',
-        participantsCount: participants.length,
-        description: metadata.desc || '',
-        createdAt: metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null,
-        isReadOnly: chat.isReadOnly || false,
-        participants: participants,
-        isConnected: true,
-        error: null
-      };
+        logger.info(`Got ${participants.length} participants for group ${groupId}`);
+        
+        return {
+          id: chat.id._serialized,
+          name: metadata.subject || chat.name || 'קבוצה ללא שם',
+          participantsCount: participants.length,
+          description: metadata.desc || '',
+          createdAt: metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null,
+          isReadOnly: chat.isReadOnly || false,
+          participants: participants,
+          isConnected: true,
+          error: null
+        };
+      } catch (metadataError) {
+        logger.error(`Error getting metadata for group ${groupId}:`, metadataError);
+        
+        // נסה לקבל את המשתתפים ישירות מהצ'אט
+        const participants = chat.participants?.map(participant => ({
+          id: participant.id.split('@')[0],
+          isAdmin: participant.isAdmin || false
+        })) || [];
+
+        return {
+          id: chat.id._serialized,
+          name: chat.name || 'קבוצה ללא שם',
+          participantsCount: participants.length,
+          description: '',
+          createdAt: null,
+          isReadOnly: chat.isReadOnly || false,
+          participants: participants,
+          isConnected: true,
+          error: null
+        };
+      }
     } catch (error) {
       logger.error(`Error getting group details for ${groupId}:`, error);
       throw error;

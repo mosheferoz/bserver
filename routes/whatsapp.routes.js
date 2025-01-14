@@ -360,12 +360,32 @@ router.get('/groups/:sessionId/:groupId', async (req, res) => {
       });
     }
 
-    const groupDetails = await whatsappService.getGroupDetails(sessionId, groupId);
-    res.json({ group: groupDetails });
+    try {
+      const groupDetails = await whatsappService.getGroupDetails(sessionId, groupId);
+      res.json({ group: groupDetails });
+    } catch (groupError) {
+      logger.error(`Error getting group details: ${groupError.message}`);
+      
+      // שליחת תשובה עם פרטי השגיאה
+      res.status(400).json({ 
+        error: 'Failed to get group details',
+        details: groupError.message,
+        group: {
+          id: groupId,
+          name: 'Unknown Group',
+          participantsCount: 0,
+          description: '',
+          isReadOnly: false,
+          participants: [],
+          isConnected: false,
+          error: groupError.message
+        }
+      });
+    }
   } catch (error) {
     logger.error(`Error in /groups/:sessionId/:groupId route:`, error);
     res.status(500).json({ 
-      error: 'Failed to get group details',
+      error: 'Internal server error',
       details: error.message
     });
   }
