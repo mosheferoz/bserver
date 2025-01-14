@@ -490,59 +490,46 @@ class WhatsAppService {
       let participants = [];
       let isReadOnly = chat.isReadOnly || false;
 
+      // נסיון לקבל מידע על הקבוצה
       try {
-        // נסיון לקבל את המטא-דאטה של הקבוצה
-        logger.info('Attempting to get group metadata...');
-        const metadata = await chat.groupMetadata;
-        if (metadata) {
-          logger.info('Successfully got group metadata');
-          groupName = metadata.subject || metadata.name || groupName;
-          groupDesc = metadata.desc || '';
-          groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
-        }
-      } catch (metadataError) {
-        logger.warn(`Failed to get group metadata: ${metadataError.message}`);
-      }
-
-      try {
-        // נסיון לקבל את המשתתפים
-        logger.info('Attempting to get participants...');
-        const participantsList = await chat.participants;
-        if (participantsList && Array.isArray(participantsList)) {
-          participants = participantsList.map(p => ({
-            id: p.id._serialized.split('@')[0],
-            isAdmin: p.isAdmin || false
-          }));
-          logger.info(`Found ${participants.length} participants`);
-        } else if (participantsList && typeof participantsList === 'object') {
-          // במקרה שמקבלים אובייקט במקום מערך
-          participants = Object.values(participantsList).map(p => ({
-            id: p.id._serialized.split('@')[0],
-            isAdmin: p.isAdmin || false
-          }));
-          logger.info(`Found ${participants.length} participants from object`);
-        }
-      } catch (participantsError) {
-        logger.warn(`Failed to get participants: ${participantsError.message}`);
-      }
-
-      // נסיון נוסף אם לא הצלחנו לקבל משתתפים
-      if (participants.length === 0) {
-        try {
-          logger.info('Attempting alternative method to get participants...');
-          const groupChat = await client.getChats().then(chats => 
-            chats.find(c => c.id._serialized === groupId)
-          );
+        logger.info('Attempting to get group info...');
+        const groupInfo = await chat.getGroupMetadata();
+        if (groupInfo) {
+          logger.info('Successfully got group info');
+          groupName = groupInfo.subject || groupInfo.name || groupName;
+          groupDesc = groupInfo.desc || '';
+          groupCreatedAt = groupInfo.creation ? new Date(groupInfo.creation * 1000).toISOString() : null;
           
-          if (groupChat?.participants) {
-            participants = groupChat.participants.map(p => ({
-              id: p.id._serialized.split('@')[0],
+          if (groupInfo.participants && Array.isArray(groupInfo.participants)) {
+            participants = groupInfo.participants.map(p => ({
+              id: (p.id?._serialized || p.id).split('@')[0],
               isAdmin: p.isAdmin || false
             }));
-            logger.info(`Found ${participants.length} participants using alternative method`);
+            logger.info(`Found ${participants.length} participants from group info`);
           }
-        } catch (altError) {
-          logger.warn(`Failed to get participants using alternative method: ${altError.message}`);
+        }
+      } catch (groupInfoError) {
+        logger.warn(`Failed to get group info: ${groupInfoError.message}`);
+      }
+
+      // אם לא הצלחנו לקבל משתתפים, ננסה דרך chat.participants
+      if (participants.length === 0) {
+        try {
+          logger.info('Attempting to get participants from chat...');
+          const chatParticipants = await chat.participants;
+          if (chatParticipants) {
+            const participantsList = Array.isArray(chatParticipants) ? 
+              chatParticipants : 
+              Object.values(chatParticipants);
+
+            participants = participantsList.map(p => ({
+              id: (p.id?._serialized || p.id).split('@')[0],
+              isAdmin: p.isAdmin || false
+            }));
+            logger.info(`Found ${participants.length} participants from chat`);
+          }
+        } catch (participantsError) {
+          logger.warn(`Failed to get participants from chat: ${participantsError.message}`);
         }
       }
 
