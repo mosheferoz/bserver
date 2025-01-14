@@ -490,93 +490,96 @@ class WhatsAppService {
       let participants = [];
       let isReadOnly = chat.isReadOnly || false;
 
-      // נסיון ראשון - שימוש ב-groupMetadata
+      // נסיון לקבל מידע על הקבוצה דרך הממשק הפנימי
       try {
-        logger.info('Attempting to get group metadata...');
-        const metadata = await chat.groupMetadata;
-        if (metadata) {
-          logger.info('Successfully got group metadata');
-          groupName = metadata.subject || metadata.name || groupName;
-          groupDesc = metadata.desc || '';
-          groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
+        logger.info('Attempting to get group info through internal interface...');
+        const rawChat = await client.pupPage.evaluate(async (groupId) => {
+          try {
+            // @ts-ignore
+            const Store = window.Store || window.WhatsApp;
+            const chat = Store.Chat.get(groupId);
+            const metadata = await Store.GroupMetadata.find(groupId);
+            
+            return {
+              name: chat.name,
+              desc: metadata?.desc,
+              creation: metadata?.creation,
+              participants: metadata?.participants.getModelsArray().map(p => ({
+                id: p.id._serialized,
+                isAdmin: p.isAdmin
+              }))
+            };
+          } catch (e) {
+            return null;
+          }
+        }, groupId);
+
+        if (rawChat) {
+          logger.info('Successfully got group info through internal interface');
+          groupName = rawChat.name || groupName;
+          groupDesc = rawChat.desc || '';
+          groupCreatedAt = rawChat.creation ? new Date(rawChat.creation * 1000).toISOString() : null;
           
-          if (metadata.participants && Array.isArray(metadata.participants)) {
-            participants = metadata.participants.map(p => ({
-              id: (p.id?._serialized || p.id).split('@')[0],
+          if (rawChat.participants && Array.isArray(rawChat.participants)) {
+            participants = rawChat.participants.map(p => ({
+              id: p.id.split('@')[0],
               isAdmin: p.isAdmin || false
             }));
-            logger.info(`Found ${participants.length} participants from metadata`);
+            logger.info(`Found ${participants.length} participants through internal interface`);
           }
         }
-      } catch (metadataError) {
-        logger.warn(`Failed to get metadata: ${metadataError.message}`);
+      } catch (internalError) {
+        logger.warn(`Failed to get info through internal interface: ${internalError.message}`);
       }
 
-      // נסיון שני - שימוש ישיר במשתתפים
+      // אם לא הצלחנו לקבל משתתפים, ננסה דרך הממשק הרגיל
       if (participants.length === 0) {
         try {
-          logger.info('Attempting to get participants directly...');
-          const rawParticipants = chat._data?.participants || [];
+          logger.info('Attempting to get participants through regular interface...');
+          const metadata = await client.groupMetadata(groupId);
           
-          if (Array.isArray(rawParticipants)) {
-            participants = rawParticipants.map(p => {
-              const id = typeof p === 'string' ? p : p.id?._serialized || p.id;
-              return {
-                id: id.split('@')[0],
-                isAdmin: p.isAdmin || false
-              };
-            });
-            logger.info(`Found ${participants.length} participants directly`);
-          }
-        } catch (participantsError) {
-          logger.warn(`Failed to get participants directly: ${participantsError.message}`);
-        }
-      }
-
-      // נסיון שלישי - שימוש בפונקציית עזר
-      if (participants.length === 0) {
-        try {
-          logger.info('Attempting to get participants using helper...');
-          const messages = await chat.fetchMessages({ limit: 1 });
-          if (messages && messages[0]) {
-            const msg = messages[0];
-            const participantsList = msg._data?.participants || [];
-            
-            if (Array.isArray(participantsList)) {
-              participants = participantsList.map(p => {
-                const id = typeof p === 'string' ? p : p.id?._serialized || p.id;
-                return {
-                  id: id.split('@')[0],
-                  isAdmin: p.isAdmin || false
-                };
-              });
-              logger.info(`Found ${participants.length} participants from message`);
-            }
-          }
-        } catch (helperError) {
-          logger.warn(`Failed to get participants using helper: ${helperError.message}`);
-        }
-      }
-
-      // נסיון רביעי - שימוש בפונקציית עזר נוספת
-      if (participants.length === 0) {
-        try {
-          logger.info('Attempting to get participants using alternative method...');
-          const rawChat = await client.pupPage.evaluate(async (groupId) => {
-            const wwebModule = window.Store.GroupMetadata;
-            const chat = await wwebModule.find(groupId);
-            return chat ? { participants: chat.participants } : null;
-          }, groupId);
-          
-          if (rawChat && Array.isArray(rawChat.participants)) {
-            participants = rawChat.participants.map(p => ({
+          if (metadata && metadata.participants) {
+            participants = metadata.participants.map(p => ({
               id: p.id.user,
               isAdmin: p.isAdmin || false
             }));
-            logger.info(`Found ${participants.length} participants using alternative method`);
+            logger.info(`Found ${participants.length} participants through regular interface`);
           }
-        } catch (altError) {
-          logger.warn(`Failed to get participants using alternative method: ${altError.message}`);
+        } catch (metadataError) {
+          logger.warn(`Failed to get metadata through regular interface: ${metadataError.message}`);
+        }
+      }
+
+      // נסיון אחרון - שימוש בפונקציית עזר
+      if (participants.length === 0) {
+        try {
+          logger.info('Attempting final method to get participants...');
+          const rawData = await client.pupPage.evaluate(async (groupId) => {
+            try {
+              // @ts-ignore
+              const Store = window.Store || window.WhatsApp;
+              const wid = Store.WidFactory.createWid(groupId);
+              const group = await Store.GroupMetadata.find(wid);
+              return group ? {
+                participants: group.participants.getModelsArray().map(p => ({
+                  id: p.id._serialized,
+                  isAdmin: p.isAdmin
+                }))
+              } : null;
+            } catch (e) {
+              return null;
+            }
+          }, groupId);
+
+          if (rawData && Array.isArray(rawData.participants)) {
+            participants = rawData.participants.map(p => ({
+              id: p.id.split('@')[0],
+              isAdmin: p.isAdmin || false
+            }));
+            logger.info(`Found ${participants.length} participants through final method`);
+          }
+        } catch (finalError) {
+          logger.warn(`Failed to get participants through final method: ${finalError.message}`);
         }
       }
 
