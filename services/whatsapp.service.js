@@ -467,44 +467,31 @@ class WhatsAppService {
       }
 
       // בדיקה אם זו קבוצה
-      const isGroup = chat.isGroup || 
-                     chat.groupMetadata || 
-                     (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us'));
-
-      if (!isGroup) {
+      if (!chat.isGroup) {
         logger.warn(`Chat ${groupId} is not a group`);
         throw new Error('Not a group chat');
       }
 
       // קבלת מטא-דאטה של הקבוצה
-      let metadata;
-      try {
-        metadata = await chat.groupMetadata;
-        logger.info(`Got metadata for group ${groupId}: ${JSON.stringify(metadata)}`);
-      } catch (error) {
-        logger.warn(`Failed to get metadata for group ${groupId}:`, error);
-      }
+      const metadata = await chat.groupMetadata;
+      logger.info(`Got metadata for group ${groupId}`);
 
-      // קבלת המשתתפים
-      let participants = [];
-      try {
-        participants = await chat.participants || [];
-        logger.info(`Got ${participants.length} participants for group ${groupId}`);
-      } catch (error) {
-        logger.warn(`Failed to get participants for group ${groupId}:`, error);
-      }
+      // קבלת כל המשתתפים בקבוצה
+      const participants = metadata.participants.map(participant => ({
+        id: participant.id.user, // רק המספר, בלי ה-@c.us
+        isAdmin: participant.isAdmin || participant.isSuperAdmin
+      }));
+
+      logger.info(`Got ${participants.length} participants for group ${groupId}`);
       
       return {
         id: chat.id._serialized,
-        name: chat.name || metadata?.subject || 'קבוצה ללא שם',
+        name: metadata.subject || chat.name || 'קבוצה ללא שם',
         participantsCount: participants.length,
-        description: metadata?.desc || '',
-        createdAt: metadata?.creation ? new Date(metadata.creation * 1000).toISOString() : null,
+        description: metadata.desc || '',
+        createdAt: metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null,
         isReadOnly: chat.isReadOnly || false,
-        participants: participants.map(p => ({
-          id: p.id._serialized,
-          isAdmin: p.isAdmin || false,
-        })),
+        participants: participants,
         isConnected: true,
         error: null
       };
