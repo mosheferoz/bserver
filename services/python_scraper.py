@@ -56,20 +56,27 @@ def scrape_event_data(url):
 
         print("Extracting description...", file=sys.stderr)
         description = ""
-        main_content = soup.find('div', {'class': 'event-description'}) or soup.find('div', {'class': 'description'})
         
-        if main_content:
-            # מחפש את כל הטקסט בתוך האלמנט
-            description = main_content.get_text(separator='\n', strip=True)
-        else:
-            # אם לא מצאנו את האלמנט הספציפי, ננסה למצוא טקסט משמעותי בדף
-            content_blocks = []
-            for p in soup.find_all(['p', 'div']):
-                text = p.get_text(strip=True)
-                if len(text) > 100:  # מחפש בלוקים של טקסט משמעותיים
+        # מחפש את כל הטקסטים המשמעותיים בדף
+        content_blocks = []
+        skip_texts = {'מציאת אירועים', 'יצירת אירוע', 'הכרטיסים שלי', 'ניהול', 'שפה ומיקום',
+                     'הורדת האפליקציה', 'IOS', 'ANDROID', 'VISITOR', 'LOGIN', 'SIGN UP',
+                     'בכדי להנות מחווית משתמש נוחה יותר', 'ניתן להוריד את האפליקציה שלנו בחנות ההורדות'}
+        
+        for element in soup.find_all(['div', 'p', 'span']):
+            text = element.get_text(strip=True)
+            if text and len(text) > 30:  # טקסט משמעותי צריך להיות ארוך מספיק
+                # מסנן טקסטים לא רלוונטיים
+                if not any(skip_text in text for skip_text in skip_texts):
                     content_blocks.append(text)
-            if content_blocks:
-                description = '\n\n'.join(content_blocks)
+        
+        if content_blocks:
+            # מסנן כפילויות ומאחד את הטקסטים
+            unique_blocks = []
+            for block in content_blocks:
+                if block not in unique_blocks:
+                    unique_blocks.append(block)
+            description = '\n\n'.join(unique_blocks)
         
         result = {
             "eventName": _cleanEventName(title),
