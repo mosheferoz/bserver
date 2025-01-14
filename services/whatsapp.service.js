@@ -490,56 +490,59 @@ class WhatsAppService {
       let participants = [];
       let isReadOnly = chat.isReadOnly || false;
 
-      // נסיון ראשון - קבלת משתתפים ישירות
       try {
+        // נסיון לקבל את המטא-דאטה של הקבוצה
+        logger.info('Attempting to get group metadata...');
+        const metadata = await chat.groupMetadata;
+        if (metadata) {
+          logger.info('Successfully got group metadata');
+          groupName = metadata.subject || metadata.name || groupName;
+          groupDesc = metadata.desc || '';
+          groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
+        }
+      } catch (metadataError) {
+        logger.warn(`Failed to get group metadata: ${metadataError.message}`);
+      }
+
+      try {
+        // נסיון לקבל את המשתתפים
+        logger.info('Attempting to get participants...');
         const participantsList = await chat.participants;
         if (participantsList && Array.isArray(participantsList)) {
           participants = participantsList.map(p => ({
             id: p.id._serialized.split('@')[0],
             isAdmin: p.isAdmin || false
           }));
-          logger.info(`Found ${participants.length} participants directly from chat`);
+          logger.info(`Found ${participants.length} participants`);
+        } else if (participantsList && typeof participantsList === 'object') {
+          // במקרה שמקבלים אובייקט במקום מערך
+          participants = Object.values(participantsList).map(p => ({
+            id: p.id._serialized.split('@')[0],
+            isAdmin: p.isAdmin || false
+          }));
+          logger.info(`Found ${participants.length} participants from object`);
         }
       } catch (participantsError) {
-        logger.warn(`Failed to get participants directly: ${participantsError.message}`);
+        logger.warn(`Failed to get participants: ${participantsError.message}`);
       }
 
-      // נסיון שני - קבלת מטא-דאטה
+      // נסיון נוסף אם לא הצלחנו לקבל משתתפים
       if (participants.length === 0) {
         try {
-          const metadata = await chat.getMetadata();
-          if (metadata) {
-            logger.info('Successfully fetched group metadata');
-            groupName = metadata.name || groupName;
-            groupDesc = metadata.desc || '';
-            groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
-
-            if (metadata.participants && Array.isArray(metadata.participants)) {
-              participants = metadata.participants.map(p => ({
-                id: p.id.split('@')[0],
-                isAdmin: p.isAdmin || false
-              }));
-              logger.info(`Found ${participants.length} participants from metadata`);
-            }
-          }
-        } catch (metadataError) {
-          logger.warn(`Failed to fetch group metadata: ${metadataError.message}`);
-        }
-      }
-
-      // נסיון שלישי - שימוש בפונקציות נוספות
-      if (participants.length === 0) {
-        try {
-          const fetchedParticipants = await chat.fetchParticipants();
-          if (fetchedParticipants && Array.isArray(fetchedParticipants)) {
-            participants = fetchedParticipants.map(p => ({
+          logger.info('Attempting alternative method to get participants...');
+          const groupChat = await client.getChats().then(chats => 
+            chats.find(c => c.id._serialized === groupId)
+          );
+          
+          if (groupChat?.participants) {
+            participants = groupChat.participants.map(p => ({
               id: p.id._serialized.split('@')[0],
               isAdmin: p.isAdmin || false
             }));
-            logger.info(`Found ${participants.length} participants using fetchParticipants`);
+            logger.info(`Found ${participants.length} participants using alternative method`);
           }
-        } catch (fetchError) {
-          logger.warn(`Failed to fetch participants: ${fetchError.message}`);
+        } catch (altError) {
+          logger.warn(`Failed to get participants using alternative method: ${altError.message}`);
         }
       }
 
