@@ -58,44 +58,49 @@ def scrape_event_data(url):
         description = ""
         
         # מחפש את התיאור בצורה ממוקדת
-        # מחפש טקסט שמתחיל עם "EXPO TLV" או מכיל "חג פורים"
         content_blocks = []
         
-        # מחפש את כל הטקסטים בדף
-        texts = soup.find_all(text=True)
-        
-        # מחפש את האינדקס של תחילת התיאור
-        start_index = -1
-        for i, text in enumerate(texts):
-            if 'EXPO TLV' in text or 'חג פורים' in text:
-                start_index = i
-                break
-        
-        if start_index != -1:
-            # אוסף את כל הטקסטים הרלוונטיים עד שמגיעים לחלק של הנהלים או הכפתורים
-            current_block = []
-            for text in texts[start_index:]:
-                cleaned_text = text.strip()
-                if not cleaned_text:
-                    continue
-                    
-                # עוצר כשמגיעים לחלק של הנהלים או כפתורי הניווט
-                if any(stop_word in cleaned_text for stop_word in ['נהלים והנחיות', 'מציאת אירועים', 'יצירת אירוע', 'LOGIN']):
-                    break
-                    
-                # מוסיף רק טקסטים משמעותיים
-                if len(cleaned_text) > 5 and not cleaned_text.startswith('http'):
-                    current_block.append(cleaned_text)
-            
-            if current_block:
-                content_blocks.extend(current_block)
+        # מוצא את כל הדיבים שמכילים טקסט
+        for div in soup.find_all(['div', 'p', 'span']):
+            text = div.get_text(strip=True)
+            if not text:
+                continue
+                
+            # מתעלם מ-JSON וטקסטים לא רלוונטיים
+            if text.startswith('{') or text.startswith('[') or text.startswith('//'):
+                continue
+                
+            if any(skip_word in text.lower() for skip_word in [
+                'login', 'sign up', 'visitor', 'android', 'ios',
+                'מציאת אירועים', 'יצירת אירוע', 'הכרטיסים שלי', 'ניהול',
+                'שפה ומיקום', 'הורדת האפליקציה'
+            ]):
+                continue
+                
+            # מחפש טקסטים שמתאימים לתיאור האירוע
+            if ('expo tlv' in text.lower() or 
+                'חג פורים' in text or 
+                'פסטיבל' in text or
+                'אירוע' in text):
+                
+                # מפצל את הטקסט לפי שורות ומסנן שורות ריקות
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                
+                for line in lines:
+                    # מסנן שורות קצרות מדי או שורות שמכילות רק תווים מיוחדים
+                    if len(line) > 5 and not all(c in '.,!?-_*#@&' for c in line):
+                        content_blocks.append(line)
         
         if content_blocks:
             # מסנן כפילויות
             unique_blocks = []
+            seen = set()
             for block in content_blocks:
-                if block not in unique_blocks:
+                if block not in seen:
+                    seen.add(block)
                     unique_blocks.append(block)
+            
+            # מסדר את הבלוקים לפי הסדר הנכון
             description = '\n\n'.join(unique_blocks)
         
         result = {
