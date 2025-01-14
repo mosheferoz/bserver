@@ -412,45 +412,11 @@ class WhatsAppService {
       logger.info(`Found ${groups.length} groups after filtering`);
 
       // המרה למבנה הנדרש
-      const formattedGroups = await Promise.all(groups.map(async group => {
-        try {
-          let participantsCount = 0;
-          let participants = [];
-
-          try {
-            participants = await group.participants || [];
-            participantsCount = participants.length;
-            logger.debug(`Got ${participantsCount} participants directly for group ${group.name}`);
-          } catch (participantsError) {
-            logger.warn(`Failed to get participants directly for group ${group.name}:`, participantsError);
-            
-            try {
-              const metadata = await group.getMetadata();
-              if (metadata?.participants) {
-                participants = metadata.participants;
-                participantsCount = participants.length;
-                logger.debug(`Got ${participantsCount} participants from metadata for group ${group.name}`);
-              }
-            } catch (metadataError) {
-              logger.warn(`Failed to get metadata for group ${group.name}:`, metadataError);
-            }
-          }
-
-          return {
-            id: group.id._serialized,
-            name: group.name || 'קבוצה ללא שם',
-            participantsCount: participantsCount,
-            isReadOnly: group.isReadOnly || false,
-          };
-        } catch (error) {
-          logger.error(`Error processing group ${group.name}:`, error);
-          return {
-            id: group.id._serialized,
-            name: group.name || 'קבוצה ללא שם',
-            participantsCount: 0,
-            isReadOnly: false,
-          };
-        }
+      const formattedGroups = groups.map(group => ({
+        id: group.id._serialized,
+        name: group.name || 'קבוצה ללא שם',
+        participantsCount: group.groupMetadata?.participants?.length || 0,
+        isReadOnly: group.isReadOnly || false,
       }));
 
       logger.info(`Returning ${formattedGroups.length} formatted groups`);
@@ -492,44 +458,67 @@ class WhatsAppService {
 
       // נסיון לקבל מידע על הקבוצה
       try {
-        logger.info('Attempting to get group info...');
-        const groupInfo = await chat.getGroupMetadata();
-        if (groupInfo) {
-          logger.info('Successfully got group info');
-          groupName = groupInfo.subject || groupInfo.name || groupName;
-          groupDesc = groupInfo.desc || '';
-          groupCreatedAt = groupInfo.creation ? new Date(groupInfo.creation * 1000).toISOString() : null;
+        logger.info('Attempting to get group metadata...');
+        const metadata = chat.groupMetadata;
+        if (metadata) {
+          logger.info('Successfully got group metadata');
+          groupName = metadata.subject || metadata.name || groupName;
+          groupDesc = metadata.desc || '';
+          groupCreatedAt = metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null;
           
-          if (groupInfo.participants && Array.isArray(groupInfo.participants)) {
-            participants = groupInfo.participants.map(p => ({
+          if (metadata.participants && Array.isArray(metadata.participants)) {
+            participants = metadata.participants.map(p => ({
               id: (p.id?._serialized || p.id).split('@')[0],
               isAdmin: p.isAdmin || false
             }));
-            logger.info(`Found ${participants.length} participants from group info`);
+            logger.info(`Found ${participants.length} participants from metadata`);
           }
         }
-      } catch (groupInfoError) {
-        logger.warn(`Failed to get group info: ${groupInfoError.message}`);
+      } catch (metadataError) {
+        logger.warn(`Failed to get metadata: ${metadataError.message}`);
       }
 
-      // אם לא הצלחנו לקבל משתתפים, ננסה דרך chat.participants
+      // נסיון לקבל משתתפים ישירות מהצ'אט
       if (participants.length === 0) {
         try {
-          logger.info('Attempting to get participants from chat...');
-          const chatParticipants = await chat.participants;
-          if (chatParticipants) {
-            const participantsList = Array.isArray(chatParticipants) ? 
-              chatParticipants : 
-              Object.values(chatParticipants);
-
-            participants = participantsList.map(p => ({
-              id: (p.id?._serialized || p.id).split('@')[0],
+          logger.info('Attempting to get participants from chat object...');
+          const rawParticipants = chat._data?.participants || chat.participants || [];
+          
+          participants = rawParticipants.map(p => {
+            const id = typeof p === 'string' ? p : p.id?._serialized || p.id;
+            return {
+              id: id.split('@')[0],
               isAdmin: p.isAdmin || false
-            }));
-            logger.info(`Found ${participants.length} participants from chat`);
-          }
+            };
+          });
+          
+          logger.info(`Found ${participants.length} participants from chat object`);
         } catch (participantsError) {
           logger.warn(`Failed to get participants from chat: ${participantsError.message}`);
+        }
+      }
+
+      // נסיון נוסף - שימוש בפונקציית עזר
+      if (participants.length === 0) {
+        try {
+          logger.info('Attempting to get participants using helper function...');
+          const messages = await chat.fetchMessages({ limit: 1 });
+          if (messages && messages[0]) {
+            const msg = messages[0];
+            const participantsList = msg.participants || msg._data?.participants || [];
+            
+            participants = participantsList.map(p => {
+              const id = typeof p === 'string' ? p : p.id?._serialized || p.id;
+              return {
+                id: id.split('@')[0],
+                isAdmin: p.isAdmin || false
+              };
+            });
+            
+            logger.info(`Found ${participants.length} participants from message`);
+          }
+        } catch (helperError) {
+          logger.warn(`Failed to get participants using helper: ${helperError.message}`);
         }
       }
 
