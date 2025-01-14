@@ -407,16 +407,10 @@ class WhatsAppService {
       const chats = await client.getChats();
       logger.info(`Found ${chats.length} total chats`);
       
-      // סינון רבוצות לפי מספר מאפיינים
-      const groups = chats.filter(chat => {
-        const isGroup = chat.isGroup || 
-                       chat.groupMetadata || 
-                       (chat.id && chat.id._serialized && chat.id._serialized.includes('@g.us')) ||
-                       chat.participants?.length > 2;
-                       
-        logger.debug(`Chat ${chat.name}: isGroup=${isGroup}, id=${chat.id?._serialized}`);
-        return isGroup;
-      });
+      // סינון קבוצות
+      const groups = chats.filter(chat => 
+        chat.isGroup && chat.id._serialized.includes('@g.us')
+      );
       
       logger.info(`Found ${groups.length} groups after filtering`);
 
@@ -426,17 +420,25 @@ class WhatsAppService {
           const metadata = await group.groupMetadata;
           return {
             id: group.id._serialized,
-            name: group.name || metadata?.subject || 'קבוצה ללא שם',
-            participantsCount: metadata?.participants?.length || group.participants?.length || 0,
-            isReadOnly: group.isReadOnly || false,
+            name: metadata?.subject || group.name || 'קבוצה ללא שם',
+            participantsCount: metadata?.participants?.length || 0,
+            isReadOnly: metadata?.announce || false,
+            description: metadata?.desc || '',
+            createdAt: metadata?.creation ? new Date(metadata.creation * 1000).toISOString() : null,
+            isConnected: true,
+            error: null
           };
         } catch (error) {
           logger.error(`Error getting metadata for group ${group.name}:`, error);
           return {
             id: group.id._serialized,
             name: group.name || 'קבוצה ללא שם',
-            participantsCount: group.participants?.length || 0,
-            isReadOnly: group.isReadOnly || false,
+            participantsCount: 0,
+            isReadOnly: false,
+            description: '',
+            createdAt: null,
+            isConnected: false,
+            error: error.message
           };
         }
       }));
@@ -459,7 +461,7 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      // קבלת הצ'אט הספציפי ישירות
+      // קבלת הצ'אט הספציפי
       const chat = await client.getChatById(groupId);
       if (!chat) {
         logger.warn(`Group ${groupId} not found`);
@@ -467,7 +469,7 @@ class WhatsAppService {
       }
 
       // בדיקה אם זו קבוצה
-      if (!chat.isGroup) {
+      if (!chat.isGroup || !chat.id._serialized.includes('@g.us')) {
         logger.warn(`Chat ${groupId} is not a group`);
         throw new Error('Not a group chat');
       }
@@ -478,7 +480,7 @@ class WhatsAppService {
 
       // קבלת כל המשתתפים בקבוצה
       const participants = metadata.participants.map(participant => ({
-        id: participant.id.user, // רק המספר, בלי ה-@c.us
+        id: participant.id.user,
         isAdmin: participant.isAdmin || participant.isSuperAdmin
       }));
 
@@ -490,7 +492,7 @@ class WhatsAppService {
         participantsCount: participants.length,
         description: metadata.desc || '',
         createdAt: metadata.creation ? new Date(metadata.creation * 1000).toISOString() : null,
-        isReadOnly: chat.isReadOnly || false,
+        isReadOnly: metadata.announce || false,
         participants: participants,
         isConnected: true,
         error: null
