@@ -47,61 +47,62 @@ def scrape_event_data(url):
             if img_tag:
                 image = img_tag.get('src')
         
-        print("Extracting date...", file=sys.stderr)
+        print("Extracting date and description from JSON...", file=sys.stderr)
         date_text = None
-        for element in soup.find_all(text=True):
-            if '05:30' in element or '23:30' in element:
-                date_text = element.strip()
-                break
-
-        print("Extracting description...", file=sys.stderr)
         description = ""
         
-        # מחפש את התיאור בצורה ממוקדת
-        content_blocks = []
+        # מחפש את ה-JSON המוטמע בדף
+        scripts = soup.find_all('script')
+        for script in scripts:
+            if script.string and 'window.__NEXT_DATA__' in script.string:
+                try:
+                    # מחלץ את ה-JSON מהסקריפט
+                    json_str = script.string.split('=', 1)[1].strip()
+                    data = json.loads(json_str)
+                    
+                    # מחפש את המידע הרלוונטי ב-JSON
+                    if 'props' in data and 'pageProps' in data['props'] and 'event' in data['props']['pageProps']:
+                        event_data = data['props']['pageProps']['event']
+                        
+                        # מחלץ את התאריך
+                        if 'StartingDate' in event_data:
+                            date_text = event_data['StartingDate']
+                        
+                        # בונה את התיאור מהשדות הרלוונטיים
+                        description_parts = []
+                        
+                        if 'Adress' in event_data:
+                            description_parts.append(f"מיקום: {event_data['Adress']}")
+                        
+                        if 'MusicType' in event_data and isinstance(event_data['MusicType'], list):
+                            description_parts.append(f"סוגי מוזיקה: {', '.join(event_data['MusicType'])}")
+                        
+                        if 'EventType' in event_data:
+                            description_parts.append(f"סוג אירוע: {event_data['EventType']}")
+                        
+                        if 'MinimumAge' in event_data:
+                            description_parts.append(f"גיל מינימלי: {event_data['MinimumAge']}")
+                        
+                        # מוסיף את התיאור המלא מהדף
+                        if 'Description' in event_data:
+                            description_parts.append(event_data['Description'])
+                        
+                        description = '\n\n'.join(description_parts)
+                        break
+                except Exception as e:
+                    print(f"Error parsing JSON: {e}", file=sys.stderr)
+                    continue
         
-        # מוצא את כל הדיבים שמכילים טקסט
-        for div in soup.find_all(['div', 'p', 'span']):
-            text = div.get_text(strip=True)
-            if not text:
-                continue
-                
-            # מתעלם מ-JSON וטקסטים לא רלוונטיים
-            if text.startswith('{') or text.startswith('[') or text.startswith('//'):
-                continue
-                
-            if any(skip_word in text.lower() for skip_word in [
-                'login', 'sign up', 'visitor', 'android', 'ios',
-                'מציאת אירועים', 'יצירת אירוע', 'הכרטיסים שלי', 'ניהול',
-                'שפה ומיקום', 'הורדת האפליקציה'
-            ]):
-                continue
-                
-            # מחפש טקסטים שמתאימים לתיאור האירוע
-            if ('expo tlv' in text.lower() or 
-                'חג פורים' in text or 
-                'פסטיבל' in text or
-                'אירוע' in text):
-                
-                # מפצל את הטקסט לפי שורות ומסנן שורות ריקות
-                lines = [line.strip() for line in text.split('\n') if line.strip()]
-                
-                for line in lines:
-                    # מסנן שורות קצרות מדי או שורות שמכילות רק תווים מיוחדים
-                    if len(line) > 5 and not all(c in '.,!?-_*#@&' for c in line):
-                        content_blocks.append(line)
-        
-        if content_blocks:
-            # מסנן כפילויות
-            unique_blocks = []
-            seen = set()
-            for block in content_blocks:
-                if block not in seen:
-                    seen.add(block)
-                    unique_blocks.append(block)
-            
-            # מסדר את הבלוקים לפי הסדר הנכון
-            description = '\n\n'.join(unique_blocks)
+        # אם לא מצאנו תיאור ב-JSON, ננסה לחפש בטקסט הרגיל
+        if not description:
+            print("Falling back to text extraction...", file=sys.stderr)
+            content_blocks = []
+            for div in soup.find_all(['div', 'p']):
+                text = div.get_text(strip=True)
+                if text and len(text) > 30 and 'expo tlv' in text.lower():
+                    content_blocks.append(text)
+            if content_blocks:
+                description = '\n\n'.join(content_blocks)
         
         result = {
             "eventName": _cleanEventName(title),
