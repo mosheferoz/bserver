@@ -1,7 +1,7 @@
 const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs-extra');
-const { rimraf } = require('rimraf');
+const rimraf = require('rimraf');
 const config = require('../config');
 const logger = require('../logger');
 const path = require('path');
