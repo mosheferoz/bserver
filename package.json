@@ -28,8 +28,7 @@
     "mongoose": "^8.0.3",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
-    "puppeteer": "^21.7.0",
-    "puppeteer-core": "^21.7.0",
+    "puppeteer": "^21.11.0",
     "qrcode": "^1.5.3",
     "rimraf": "^3.0.2",
     "socket.io": "^4.7.2",
@@ -38,5 +37,14 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
+  },
+  "puppeteer": {
+    "args": [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--disable-gpu"
+    ]
   }
 }
