@@ -3,7 +3,7 @@ services:
     name: whatsapp-bulk-sender
     env: node
     buildCommand: |
-      apt-get update && apt-get install -y \
+      sudo apt-get update && sudo apt-get install -y \
         gconf-service \
         libgbm-dev \
         libasound2 \
@@ -42,7 +42,8 @@ services:
         libnss3 \
         lsb-release \
         xdg-utils \
-        wget
+        wget \
+        chromium-browser
       npm install
       python3 -m pip install --upgrade pip
       python3 -m pip install rasa
@@ -56,6 +57,10 @@ services:
         value: 10000
       - key: PYTHONUNBUFFERED
         value: "true"
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: "/usr/bin/chromium-browser"
     buildFilter:
       paths:
         - package.json
