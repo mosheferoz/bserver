@@ -2,7 +2,12 @@ services:
   - type: web
     name: whatsapp-bulk-sender
     env: node
-    buildCommand: npm install && python3 -m pip install -r requirements.txt
+    buildCommand: |
+      npm install
+      python3 -m pip install --upgrade pip
+      python3 -m pip install rasa
+      python3 -m pip install -r requirements.txt
+      cd rasa && rasa train && cd ..
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -16,4 +21,5 @@ services:
         - package.json
         - requirements.txt
         - services/**
-        - routes/** 
+        - routes/**
+        - rasa/** 
