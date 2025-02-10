@@ -3,6 +3,9 @@ services:
     name: whatsapp-bulk-sender
     env: node
     buildCommand: |
+      apt-get update
+      apt-get install -y chromium chromium-driver
+      export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       npm install
       python3 -m pip install --upgrade pip
       python3 -m pip install rasa
@@ -15,7 +18,11 @@ services:
       - key: PORT
         value: 10000
       - key: PYTHONUNBUFFERED
-        value: "false"
+        value: "true"
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: "/usr/bin/chromium"
     buildFilter:
       paths:
         - package.json
