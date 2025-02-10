@@ -3,14 +3,13 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const logger = require('../logger');
 
 router.post('/scrape', async (req, res) => {
     try {
         const { url } = req.body;
         logger.info('Received scraping request for URL:', url);
-        logger.info('Request headers:', req.headers);
-        logger.info('Request body:', req.body);
         
         if (!url) {
             logger.warn('No URL provided in request');
@@ -25,8 +24,6 @@ router.post('/scrape', async (req, res) => {
         const pythonScriptPath = path.join(__dirname, '../services/python_scraper.py');
         logger.info('Python script path:', pythonScriptPath);
         
-        // שדיקה שהקובץ קיים
-        const fs = require('fs');
         if (!fs.existsSync(pythonScriptPath)) {
             logger.error('Python script not found at path:', pythonScriptPath);
             return res.status(500).json({ 
@@ -34,39 +31,26 @@ router.post('/scrape', async (req, res) => {
                 details: 'The scraping script is missing'
             });
         }
-        
-        // בדיקת גרסת Python
-        const pythonVersionProcess = spawn('python3', ['--version']);
-        pythonVersionProcess.stdout.on('data', (data) => {
-            logger.info('Python version:', data.toString());
-        });
-        
-        // הרצת הסקריפט
-        const pythonProcess = spawn('python3', [pythonScriptPath, url]);
+
+        const pythonPath = 'python3';
+        const pythonProcess = spawn(pythonPath, [pythonScriptPath, url]);
 
         let dataString = '';
         let errorString = '';
 
         pythonProcess.stdout.on('data', (data) => {
-            const output = data.toString();
-            logger.debug('Python stdout:', output);
-            dataString += output;
+            dataString += data.toString();
         });
 
         pythonProcess.stderr.on('data', (data) => {
-            const error = data.toString();
-            logger.error('Python stderr:', error);
-            errorString += error;
+            errorString += data.toString();
         });
 
         pythonProcess.on('error', (error) => {
             logger.error('Failed to start Python process:', error);
             return res.status(500).json({ 
                 error: 'Failed to start scraping process',
-                details: error.message,
-                command: 'python3',
-                script: pythonScriptPath,
-                url: url
+                details: error.message
             });
         });
 
@@ -81,36 +65,28 @@ router.post('/scrape', async (req, res) => {
                     const errorObj = JSON.parse(errorString);
                     return res.status(500).json({ 
                         error: 'Failed to scrape data',
-                        details: errorObj,
-                        exitCode: code
+                        details: errorObj
                     });
                 } catch (parseError) {
                     return res.status(500).json({ 
                         error: 'Failed to scrape data',
-                        details: errorString || 'Unknown error occurred',
-                        exitCode: code
+                        details: errorString || 'Unknown error occurred'
                     });
                 }
             }
 
             try {
-                logger.debug('Raw Python output:', dataString);
                 const result = JSON.parse(dataString);
                 
                 if (!result.eventName) {
-                    logger.warn('No event name found in scraped data');
                     return res.status(404).json({ 
                         error: 'No event data found',
-                        details: 'Could not find event information on the page',
-                        rawData: result
+                        details: 'Could not find event information on the page'
                     });
                 }
                 
-                logger.info('Successfully scraped data:', result);
                 return res.json(result);
             } catch (error) {
-                logger.error('Failed to parse Python output:', error);
-                logger.error('Raw output:', dataString);
                 return res.status(500).json({ 
                     error: 'Failed to parse scraped data',
                     details: error.message,
@@ -123,8 +99,7 @@ router.post('/scrape', async (req, res) => {
         logger.error('Server error:', error);
         return res.status(500).json({ 
             error: 'Internal server error',
-            details: error.message,
-            stack: error.stack
+            details: error.message
         });
     }
 });

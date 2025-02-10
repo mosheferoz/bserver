@@ -4,11 +4,19 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
+const { spawn } = require('child_process');
+const path = require('path');
+const morgan = require('morgan');
 const config = require('./config');
 const logger = require('./logger');
 const rateLimiter = require('./middleware/rateLimiter');
 const scraperRoutes = require('./routes/scraper.routes');
 const whatsappService = require('./services/whatsapp.service');
+const whatsappRoutes = require('./routes/whatsapp.routes');
+const chatgptRoutes = require('./routes/chatgpt.routes');
+const eventsRoutes = require('./routes/events.routes');
+const virtualAgentsRoutes = require('./routes/virtual-agents.routes');
+const rasaWhatsAppService = require('./services/rasa-whatsapp.service');
 
 // יצירת אפליקציית Express
 const app = express();
@@ -23,6 +31,9 @@ const io = require('socket.io')(server, {
     methods: ["GET", "POST"]
   }
 });
+
+// העברת ה-socket.io instance לשירות ה-WhatsApp
+whatsappService.setSocketIO(io);
 
 // Middleware
 app.use(cors({
@@ -39,7 +50,10 @@ app.use(rateLimiter);
 
 // נתיבים
 app.use('/api/scraper', scraperRoutes);
-app.use('/api/whatsapp', require('./routes/whatsapp.routes'));
+app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/chatgpt', chatgptRoutes);
+app.use('/api/events', eventsRoutes);
+app.use('/api/virtual-agents', virtualAgentsRoutes);
 
 // נתיב בדיקת בריאות
 app.use('/api/health', (req, res) => {
@@ -59,7 +73,9 @@ app.get('/', (req, res) => {
         send: '/api/whatsapp/send',
         history: '/api/whatsapp/history'
       },
-      scraper: '/api/scraper/scrape'
+      scraper: '/api/scraper/scrape',
+      events: '/api/events',
+      virtualAgents: '/api/virtual-agents'
     }
   });
 });
@@ -78,22 +94,65 @@ app.use((req, res) => {
         send: '/api/whatsapp/send',
         history: '/api/whatsapp/history'
       },
-      scraper: '/api/scraper/scrape'
+      scraper: '/api/scraper/scrape',
+      events: '/api/events',
+      virtualAgents: '/api/virtual-agents'
     }
   });
 });
 
-// טיפול בשגיאות כלליות
-app.use((err, req, res, next) => {
-  logger.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+// הוספת תהליכי Rasa
+let rasaProcess = null;
+let rasaActionsProcess = null;
 
-// אתחול WhatsApp והפעלת השרת
+function startRasa() {
+    // הפעלת שרת ה-Rasa
+    rasaProcess = spawn('rasa', ['run', '--enable-api', '--cors', '*'], {
+        cwd: path.join(__dirname, 'rasa'),
+        shell: true,
+        env: {
+            ...process.env,
+            PYTHONPATH: process.env.PYTHONPATH || '',
+            SQLALCHEMY_SILENCE_UBER_WARNING: '1',
+            LOG_LEVEL: 'DEBUG'
+        }
+    });
+
+    rasaProcess.stdout.on('data', (data) => {
+        logger.info(`Rasa: ${data}`);
+    });
+
+    rasaProcess.stderr.on('data', (data) => {
+        logger.error(`Rasa Error: ${data}`);
+    });
+
+    // הפעלת שרת ה-Actions
+    rasaActionsProcess = spawn('rasa', ['run', 'actions'], {
+        cwd: path.join(__dirname, 'rasa'),
+        shell: true,
+        env: {
+            ...process.env,
+            PYTHONPATH: process.env.PYTHONPATH || '',
+            SQLALCHEMY_SILENCE_UBER_WARNING: '1',
+            LOG_LEVEL: 'DEBUG'
+        }
+    });
+
+    rasaActionsProcess.stdout.on('data', (data) => {
+        logger.info(`Rasa Actions: ${data}`);
+    });
+
+    rasaActionsProcess.stderr.on('data', (data) => {
+        logger.error(`Rasa Actions Error: ${data}`);
+    });
+}
+
+// אתחול WhatsApp, Rasa והפעלת השרת
 (async () => {
   try {
     const defaultSessionId = process.env.WHATSAPP_CLIENT_ID || 'default-session';
     await whatsappService.initialize(defaultSessionId);
+    startRasa(); // הפעלת Rasa
     await startServer();
   } catch (err) {
     logger.error('Failed to initialize:', err);
@@ -127,3 +186,16 @@ const startServer = async (retries = 3) => {
     process.exit(1);
   }
 };
+
+// ניקוי בעת סגירת השרת
+process.on('SIGTERM', async () => {
+    if (rasaProcess) rasaProcess.kill();
+    if (rasaActionsProcess) rasaActionsProcess.kill();
+    // ... existing cleanup code ...
+});
+
+process.on('SIGINT', async () => {
+    if (rasaProcess) rasaProcess.kill();
+    if (rasaActionsProcess) rasaActionsProcess.kill();
+    // ... existing cleanup code ...
+});

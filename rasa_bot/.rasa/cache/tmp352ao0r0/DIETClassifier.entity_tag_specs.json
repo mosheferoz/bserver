@@ -1,0 +1,36 @@
+[
+  {
+    "tag_name": "entity",
+    "ids_to_tags": {
+      "1": "B-accessibility_type",
+      "2": "I-accessibility_type",
+      "3": "L-accessibility_type",
+      "4": "U-accessibility_type",
+      "5": "B-discount_type",
+      "6": "I-discount_type",
+      "7": "L-discount_type",
+      "8": "U-discount_type",
+      "9": "B-ticket_type",
+      "10": "I-ticket_type",
+      "11": "L-ticket_type",
+      "12": "U-ticket_type",
+      "0": "O"
+    },
+    "tags_to_ids": {
+      "B-accessibility_type": 1,
+      "I-accessibility_type": 2,
+      "L-accessibility_type": 3,
+      "U-accessibility_type": 4,
+      "B-discount_type": 5,
+      "I-discount_type": 6,
+      "L-discount_type": 7,
+      "U-discount_type": 8,
+      "B-ticket_type": 9,
+      "I-ticket_type": 10,
+      "L-ticket_type": 11,
+      "U-ticket_type": 12,
+      "O": 0
+    },
+    "num_tags": 13
+  }
+]

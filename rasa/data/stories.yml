@@ -1,0 +1,302 @@
+version: "3.1"
+
+stories:
+- story: greet and ask about event
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_event_info
+  - action: utter_event_info
+
+- story: ask about date
+  steps:
+  - intent: ask_event_date
+  - action: utter_event_date
+
+- story: greet and ask about agent
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_about_agent
+  - action: utter_about_agent
+
+- story: thank and goodbye
+  steps:
+  - intent: thank
+  - action: utter_thank
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: direct goodbye
+  steps:
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: greet and out of scope
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: out_of_scope
+  - action: utter_default
+
+- story: ask multiple questions
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_event_info
+  - action: utter_event_info
+  - intent: ask_event_date
+  - action: utter_event_date
+  - intent: thank
+  - action: utter_thank
+
+- story: ask about location
+  steps:
+  - intent: ask_event_location
+  - action: utter_event_location
+
+- story: ask about price
+  steps:
+  - intent: ask_event_price
+  - action: utter_event_price
+
+- story: ask about parking
+  steps:
+  - intent: ask_parking_info
+  - action: utter_parking_info
+
+- story: ask about food
+  steps:
+  - intent: ask_food_info
+  - action: utter_food_info
+
+- story: ask about dress code
+  steps:
+  - intent: ask_dress_code
+  - action: utter_dress_code
+
+- story: ask about age restrictions
+  steps:
+  - intent: ask_age_restrictions
+  - action: action_check_age_restrictions
+
+- story: ask about tickets availability
+  steps:
+  - intent: ask_tickets_left
+  - action: utter_tickets_left
+
+- story: ask about payment methods
+  steps:
+  - intent: ask_payment_methods
+  - action: utter_payment_methods
+
+- story: ask about refund policy
+  steps:
+  - intent: ask_refund_policy
+  - action: utter_refund_policy
+
+- story: ask about group discount
+  steps:
+  - intent: ask_group_discount
+  - action: utter_group_discount
+
+- story: ask about vip options
+  steps:
+  - intent: ask_vip_options
+  - action: utter_vip_options
+
+- story: ask about accessibility
+  steps:
+  - intent: ask_accessibility
+  - action: utter_accessibility
+
+- story: ask about duration
+  steps:
+  - intent: ask_duration
+  - action: utter_duration
+
+- story: ask about schedule
+  steps:
+  - intent: ask_schedule
+  - action: utter_schedule
+
+- story: ask about performers
+  steps:
+  - intent: ask_performers
+  - action: utter_performers
+
+- story: ask about security
+  steps:
+  - intent: ask_security_measures
+  - action: utter_security_measures
+
+- story: ask about covid policy
+  steps:
+  - intent: ask_covid_policy
+  - action: utter_covid_policy
+
+- story: bot challenge
+  steps:
+  - intent: bot_challenge
+  - action: utter_iamabot
+
+- story: multiple questions about event details
+  steps:
+  - intent: ask_event_info
+  - action: utter_event_info
+  - intent: ask_event_price
+  - action: utter_event_price
+  - intent: ask_parking_info
+  - action: utter_parking_info
+  - intent: thank
+  - action: utter_thank
+
+- story: questions about attendance
+  steps:
+  - intent: ask_age_restrictions
+  - action: action_check_age_restrictions
+  - intent: ask_dress_code
+  - action: utter_dress_code
+  - intent: ask_accessibility
+  - action: utter_accessibility
+
+- story: payment related questions
+  steps:
+  - intent: ask_event_price
+  - action: utter_event_price
+  - intent: ask_payment_methods
+  - action: utter_payment_methods
+  - intent: ask_refund_policy
+  - action: utter_refund_policy
+
+- story: event logistics questions
+  steps:
+  - intent: ask_event_location
+  - action: utter_event_location
+  - intent: ask_parking_info
+  - action: utter_parking_info
+  - intent: ask_security_measures
+  - action: utter_security_measures
+
+- story: ask about event link
+  steps:
+  - intent: ask_event_link
+  - action: utter_event_link
+
+- story: ask how to pay
+  steps:
+  - intent: ask_how_to_pay
+  - action: utter_how_to_pay
+
+- story: ask for details and payment
+  steps:
+  - intent: ask_event_link
+  - action: utter_event_link
+  - intent: ask_how_to_pay
+  - action: utter_how_to_pay
+
+- story: ask about payment and event info
+  steps:
+  - intent: ask_how_to_pay
+  - action: utter_how_to_pay
+  - intent: ask_event_info
+  - action: utter_event_info
+
+- story: ask about capacity
+  steps:
+  - intent: ask_capacity
+  - action: utter_capacity
+
+- story: ask about event quality
+  steps:
+  - intent: ask_event_quality
+  - action: utter_event_quality
+
+- story: ask about capacity and quality
+  steps:
+  - intent: ask_capacity
+  - action: utter_capacity
+  - intent: ask_event_quality
+  - action: utter_event_quality
+
+- story: ask about quality and then capacity
+  steps:
+  - intent: ask_event_quality
+  - action: utter_event_quality
+  - intent: ask_capacity
+  - action: utter_capacity
+
+- story: ask about quality and thank
+  steps:
+  - intent: ask_event_quality
+  - action: utter_event_quality
+  - intent: thank
+  - action: utter_thank
+
+- story: greet and ask about quality
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_event_quality
+  - action: utter_event_quality
+
+- story: ask about capacity and express confusion
+  steps:
+  - intent: ask_capacity
+  - action: utter_capacity
+  - intent: express_confusion
+  - action: utter_clarify_capacity
+
+- story: ask about quality and express confusion
+  steps:
+  - intent: ask_event_quality
+  - action: utter_event_quality
+  - intent: express_confusion
+  - action: utter_clarify_quality
+
+- story: ask about member discount
+  steps:
+  - intent: ask_member_discount
+  - action: utter_member_discount
+
+- story: ask about performers info
+  steps:
+  - intent: ask_performers_info
+  - action: utter_performers
+
+- story: ask about family discount
+  steps:
+  - intent: ask_family_discount
+  - action: utter_family_discount
+
+- story: ask about student discount
+  steps:
+  - intent: ask_student_discount
+  - action: utter_student_discount
+
+- story: ask about military discount
+  steps:
+  - intent: ask_military_discount
+  - action: utter_military_discount
+
+- story: ask about general discounts
+  steps:
+  - intent: ask_general_discounts
+  - action: utter_general_discounts
+
+- story: ask about age and express confusion
+  steps:
+  - intent: ask_age_restrictions
+  - action: action_check_age_restrictions
+  - intent: express_confusion
+  - action: utter_clarify_age_restrictions
+
+- story: ask about age with max
+  steps:
+  - intent: ask_age_restrictions
+  - action: utter_age_restrictions
+
+- story: ask about age without max
+  steps:
+  - intent: ask_age_restrictions
+  - action: utter_age_restrictions_no_max

@@ -1,0 +1,336 @@
+version: "3.1"
+
+slots:
+  metadata:
+    type: any
+    mappings:
+      - type: custom
+  eventId:
+    type: text
+    mappings:
+      - type: custom
+
+intents:
+  - greet
+  - goodbye
+  - affirm
+  - deny
+  - thank
+  - bot_challenge
+  - ask_event_info
+  - ask_event_date
+  - ask_event_location
+  - ask_event_price
+  - ask_parking_info
+  - ask_food_info
+  - ask_dress_code
+  - ask_age_restrictions
+  - ask_tickets_left
+  - ask_payment_methods
+  - ask_refund_policy
+  - ask_group_discount
+  - ask_vip_options
+  - ask_accessibility
+  - ask_duration
+  - ask_schedule
+  - ask_performers
+  - ask_security_measures
+  - ask_covid_policy
+  - ask_event_link
+  - ask_how_to_pay
+  - out_of_scope
+  - ask_capabilities
+  - express_confusion
+  - ask_contact_info
+  - ask_about_agent
+  - ask_technical_info
+  - ask_organizer_info
+  - ask_media_policy
+  - ask_social_media
+  - ask_sponsors_partners
+  - ask_capacity
+  - ask_event_quality
+  - ask_member_discount
+  - ask_performers_info
+  - ask_about_discounts
+  - ask_family_discount
+  - ask_student_discount
+  - ask_general_discounts
+  - ask_military_discount
+
+responses:
+  utter_greet:
+    - text: "אהלן מה המצב?"
+    - text: "מה קורה?"
+    - text: "היי"
+    - text: "שלום וברכה"
+
+  utter_goodbye:
+    - text: "להתראות!"
+    - text: "ביי! מקווה שעזרתי!"
+    - text: "נתראה בקרוב!"
+    - text: "תודה ולהתראות!"
+    - text: "ביי ביי! היה נעים לעזור!"
+
+  utter_event_info:
+    - text: "וואו, {event_name} הולך להיות הדבר הכי חם השנה! 🔥 זה קורה ב-{event_date} והולך להיות פשוט טירוף! {event_info} הנה כל הפרטים המטורפים: {event_link} 🎉"
+    - text: "חייב לספר על {event_name}! 🌟 זה פשוט יהיה מטורף! קורה ב-{event_date}, {event_info} הכל פה: {event_link} ✨"
+    - text: "תקשיב על {event_name}! 🎯 הולך להיות הכי שווה! ב-{event_date}, {event_info} כל הפרטים: {event_link} 🎊"
+    - text: "מה הולך להיות ב-{event_name}? רק טירוף! 🔥 ב-{event_date}, {event_info} קפוץ לפה לכל הפרטים: {event_link} 💫"
+    - text: "בקיצור על {event_name} - הולך להיות אש! 🎉 ב-{event_date}, {event_info} הכל כתוב פה: {event_link} 🌈"
+
+  utter_event_date:
+    - text: "האירוע ב-{event_date}"
+    - text: "ב-{event_date}"
+    - text: "{event_date}"
+    
+
+  utter_event_location:
+    - text: "המיקום הכי שווה - {venue_name}! 📍 {address}"
+    - text: "איפה הכל קורה? {venue_name}! 🗺️ {address}"
+    - text: "המקום הכי חם בעיר: {venue_name}! 🌟 {address}"
+    - text: "נפגשים ב-{venue_name}! 🎯 {address}"
+    - text: "הכל קורה ב-{venue_name}! 🔥 {address}"
+
+  utter_about_agent:
+    - text: "{agent_name} "
+
+  utter_thank:
+    - text: "בכיף גדול! 😊"
+    - text: "אין עליך! 🙌"
+    - text: "הכל טוב! 🌟"
+    - text: "זה כלום! 💫"
+    - text: "בשביל זה אני פה! ✨"
+
+  utter_default:
+    - text: "אופס... לא הבנתי, אפשר להסביר אחרת? 😅"
+    - text: "סורי, התבלבלתי... נסה שוב? 🤔"
+    - text: "אוי, לא תפסתי... אפשר פעם נוספת? 💭"
+    - text: "רגע, לא הבנתי... אפשר להסביר שוב? 🎯"
+    - text: "מממ... לא בטוח שהבנתי, אפשר אחרת? 🤗"
+
+  utter_iamabot:
+    - text: "כן, אני עוזר דיגיטלי! אבל מגניב, נכון? 😎"
+    - text: "נכון! אבל אני הכי כיפי שיש! 🌟"
+    - text: "טכנית כן, אבל נכון מגניב מסירי! 😅"
+    - text: "אני פה בשביל לעזור ולהנות! 💫"
+    - text: "כן, אבל בטוח יותר מגניב מסירי! 😅"
+
+  utter_event_price:
+    - text: "עולה {regular_price} לכרטיס"
+    - text: "עולה {regular_price} לכרטיס"
+    - text: "יעלה לך {regular_price} לכרטיס"
+    - text: "כרגע זה עולה {regular_price} לכרטיס"
+    - text: "בשבילך יעלה {regular_price} לכרטיס"
+
+  utter_parking_info:
+    - text: "החניה? סגור! {parking_info} 🚗"
+    - text: "יש פתרון מושלם! {parking_info} 🚙"
+    - text: "החניה הכי נוחה: {parking_info} 🅿️"
+    - text: "בלי לחץ של חניה! {parking_info} 🚘"
+    - text: "סידרנו לך חניה: {parking_info} 🎯"
+
+  utter_food_info:
+    - text: "האוכל? פצצות! {food_drinks} {kosher_info} 😋"
+    - text: "יהיה טעים! {food_drinks} {kosher_info} 🍽️"
+    - text: "האוכל הכי טוב! {food_drinks} {kosher_info} 🍕"
+    - text: "מה אוכלים? {food_drinks} {kosher_info} 🍔"
+    - text: "יש הכל! {food_drinks} {kosher_info} 🥗"
+
+  utter_dress_code:
+    - text: "הלבוש? כיף והכי נוח! {dress_code} 👔✨"
+    - text: "איך מתלבשים? {dress_code} 👗"
+    - text: "הסטייל של האירוע: {dress_code} 🎭"
+    - text: "מה לובשים? {dress_code} 👕"
+    - text: "הלוק המושלם: {dress_code} 🌟"
+  utter_age_restrictions:
+    - text: "האירוע מיועד לגילאי {min_age} - {max_age} 📅"
+    - text: "הכניסה מותרת לגילאי {min_age} - {max_age} בלבד ✨"
+    - text: "שים לב - האירוע לגילאי {min_age} - {max_age} 🎯"
+    - text: "חשוב לציין - האירוע מיועד לגילאי {min_age} - {max_age} 📋"
+
+  utter_age_restrictions_no_max:
+    - text: "האירוע מגילאי {min_age} ומעלה 📅"
+    - text: "הכניסה מותרת מגיל {min_age} ומעלה ✨"
+    - text: "שים לב - האירוע מגיל {min_age} ומעלה 🎯"
+    - text: "חשוב לציין - האירוע מיועד לגילאי {min_age} ומעלה 📋"
+  utter_tickets_left:
+    - text: "מהר! נשארו {capacity} כרטיסים! 🏃 קופצים לפה: {event_link} 🎟"
+    - text: "עוד {capacity} כרטיסים! הולכים מהר! ⚡ {event_link} 🎫"
+    - text: "רק {capacity} כרטיסים! לא להתמהמה! 🔥 {event_link} 🎭"
+    - text: "נשארו {capacity}! תזדרזו! 💨 {event_link} 🎪"
+    - text: "{capacity} כרטיסים אחרונים! 🎯 {event_link} 🎟"
+
+  utter_payment_methods:
+    - text: "התשלום? הכי קל בעולם! {terms_conditions} 💳 הנה: {event_link}"
+    - text: "אפשר לשלם ב-{terms_conditions}! פשוט וקל! 💸 {event_link}"
+    - text: "התשלום סבבה: {terms_conditions}! 💰 קדימה: {event_link}"
+    - text: "איך משלמים? {terms_conditions}! 💳 פה: {event_link}"
+    - text: "קל לשלם: {terms_conditions}! 🏦 הנה: {event_link}"
+
+  utter_refund_policy:
+    - text: "לגבי ביטולים - הכל ברור: {refund_policy} 📝"
+    - text: "מדיניות ביטולים: {refund_policy} 📄"
+    - text: "ביטולים? קל! {refund_policy} 📑"
+    - text: "אם צריך לבטל: {refund_policy} 📋"
+    - text: "נוהל ביטולים: {refund_policy} 📜"
+
+  utter_group_discount:
+    - text: "קבוצה? יש הנחה שווה! {group_discount} "
+    - text: "כמה חברים? יש הטבה! {group_discount} "
+    - text: "מגיעים ביחד? {group_discount} "
+    - text: "חבורה שלמה? {group_discount} "
+
+  utter_vip_options:
+    - text: "VIP? הכי שווה! מחיר: {vip_price}"
+    - text: "חבילת VIP מטורפת: {vip_price}"
+    - text: "להרגיש מלכים: {vip_price}"
+    - text: "VIP זה החיים: {vip_price}"
+    - text: "הכי מפנק: {vip_price}"
+
+  utter_accessibility:
+    - text: "נגישות מלאה: {accessibility}"
+    - text: "הכל נגיש! {accessibility}"
+    - text: "נגישות? סגור: {accessibility}"
+    - text: "דאגנו לכולם: {accessibility}"
+    - text: "נגיש לכולם: {accessibility}"
+
+  utter_duration:
+    - text: "כמה זמן? מ-{start_time} עד {end_time}! הולך להיות טירוף!"
+    - text: "האירוע נמשך מ-{start_time} עד {end_time}! מושלם!"
+    - text: "הזמן עף כשנהנים! מ-{start_time} עד {end_time}"
+    - text: "מ-{start_time} עד {end_time} של טירוף!"
+    - text: "מתי נגמר? מ-{start_time} עד {end_time}!"
+
+  utter_schedule:
+    - text: "הנה מה הולך להיות: {program} 📋✨"
+    - text: "התוכנית המלאה: {program} 📝"
+    - text: "מה עושים? {program} 📅"
+    - text: "הלו\"ז המושלם: {program} 🗒️"
+    - text: "ככה זה הולך: {program} 📊"
+
+  utter_performers:
+    - text: "מי על הבמה? רק ענקים! {performers} {special_guests} 🎤🔥"
+    - text: "הליינאפ המטורף: {performers} {special_guests} 🎸"
+    - text: "מי מופיע? {performers} {special_guests} 🎼"
+    - text: "הכוכבים שלנו: {performers} {special_guests} 🎵"
+    - text: "על הבמה: {performers} {special_guests} 🎹"
+
+  utter_security_measures:
+    - text: "הביטחון? הכל סגור! {terms_conditions}"
+    - text: "בטיחות מעל הכל: {terms_conditions}"
+    - text: "דאגנו לביטחון: {terms_conditions}"
+    - text: "הכל מאובטח: {terms_conditions}"
+    - text: "ביטחון מקסימלי: {terms_conditions}"
+
+  utter_covid_policy:
+    - text: "קורונה? הכל בשליטה! {terms_conditions} 😷"
+    - text: "עדכון קורונה: {terms_conditions} 🧼"
+    - text: "בריאות מעל הכל: {terms_conditions} 🏥"
+    - text: "נהלי קורונה: {terms_conditions} 🧪"
+    - text: "שומרים על הבריאות: {terms_conditions} 🌡️"
+  utter_event_link:
+    - text: "הנה כל הפרטים: {event_link}"
+    - text: "קח את כל המידע פה על האירוע: {event_link}"
+    - text: "הכל נמצא כאן על האירוע: {event_link}"
+    - text: "כל מה שצריך לדעת על האירוע: {event_link}"
+
+  utter_how_to_pay:
+    - text: "התשלום? קליל! הנה: {event_link} - בוחרים ומשלמים! הכל מאובטח! 💳✨"
+    - text: "פשוט נכנסים ל-{event_link}, בוחרים כרטיס ומשלמים! קל! 🎟"
+    - text: "הכי פשוט בעולם: {event_link} - הכל מוסבר שם! 💸"
+    - text: "תשלום מהיר פה: {event_link} - שתי דקות וזה בכיס! 💳"
+    - text: "לרכישה מהירה: {event_link} - פשוט, מהיר ומאובטח! 🔒"
+
+  utter_technical_info:
+    - text: "המערכת הטכנית מושלמת! {sound_system} {stage_info} 🎵"
+    - text: "הציוד הכי מתקדם: {sound_system} {stage_info} 🎸"
+    - text: "הסאונד והתאורה? {sound_system} {stage_info} 🎹"
+    - text: "המפרט הטכני: {sound_system} {stage_info} 🎼"
+
+  utter_social_media:
+    - text: "הרשתות החברתיות שלנו: {social_media} {hashtags} 📱"
+    - text: "בואו לעקוב! {social_media} {hashtags} 💫"
+    - text: "מוזמנים להתחבר: {social_media} {hashtags} 🌐"
+    - text: "תמצאו אותנו ב: {social_media} {hashtags} 📲"
+    - text: "ההאשטג הרשמי: {social_media} {hashtags} #️⃣"
+
+  utter_sponsors_partners:
+    - text: "השותפים שלנו: {sponsors} {partners} 🤝"
+    - text: "בחסות: {sponsors} {partners} 🏆"
+    - text: "נותני החסות: {sponsors} {partners} 🌟"
+    - text: "שיתופי הפעולה: {sponsors} {partners} 💼"
+    - text: "התומכים שלנו: {sponsors} {partners} 🎯"
+
+  utter_capacity:
+    - text: "הולך להיות {capacity} אנשים"
+    - text: "הקיבולת היא {capacity} אנשים"
+    - text: "יש מקום ל-{capacity} אנשים"
+    - text: "המתחם יכול להכיל {capacity} אנשים"
+    - text: "{capacity} אנשים נכנסים בכיף"
+    - text: "המקום מכיל {capacity} אנשים"
+
+  utter_clarify_capacity:
+    - text: "המקום יכול להכיל {capacity} אנשים בנוחות מלאה. יש המון מרחב!"
+    - text: "המקום גדול ומרווח, מתאים ל-{capacity} אנשים. כולם יהיו בנוח!"
+    - text: "תחשוב על זה ככה - {capacity} אנשים יכולים להיות במקום ועדיין יהיה נעים ונוח!"
+    - text: "פשוט תדע - יש מקום ל-{capacity} אנשים, והמקום מתוכנן בצורה מושלמת!"
+    - text: "המקום מתאים ל-{capacity} אנשים ויש המון מקום!"
+
+
+  utter_event_quality:
+    - text: "בטח יהיה מאוד חזק"
+    - text: "האירוע יהיה מטורף"
+    - text: "יהיה רמה מאוד גבוהה"
+    - text: "רמה גבוהה מאוד"
+    - text: "יהיה אש"
+    - text: "יהיה קטלני"
+
+  utter_clarify_quality:
+    - text: "בוא אסביר למה זה יהיה מטורף - {event_info} ועוד המון הפתעות! 🎯"
+    - text: "תראה, זה הולך להיות מיוחד כי {event_info} וזה רק חלק קטן! 🌟"
+    - text: "אני אגיד לך בדיוק למה זה יהיה טירוף: {event_info} ויש עוד דברים בדרך! 🔥"
+    - text: "הנה למה זה יהיה שווה: {event_info} ויש עוד הרבה הפתעות! ✨"
+
+  utter_member_discount:
+    - text: "יש לנו הנחת מנוי מעולה! {member_discount}"
+    - text: "למנויים יש הנחה מיוחדת: {member_discount}"
+    - text: "הנחת מנוי: {member_discount}"
+
+  utter_performers_info:
+    - text: "על הבמה יהיו: {performers}"
+    - text: "הליינאפ המלא: {performers}"
+    - text: "המופיעים שלנו: {performers}"
+
+  utter_family_discount:
+    - text: "הנחת משפחה: {family_discount}"
+    - text: "למשפחות יש הנחה מיוחדת: {family_discount}"
+    - text: "יש לנו הנחה למשפחות: {family_discount}"
+
+  utter_student_discount:
+    - text: "הנחת סטודנט: {student_discount}"
+    - text: "לסטודנטים יש הנחה מיוחדת: {student_discount}"
+    - text: "יש לנו הנחה לסטודנטים: {student_discount}"
+
+  utter_military_discount:
+    - text: "הנחת חיילים: {military_discount}"
+    - text: "לחיילים יש הנחה מיוחדת: {military_discount}"
+    - text: "יש לנו הנחה לחיילים: {military_discount}"
+
+  utter_general_discounts:
+    - text: "יש לנו מגוון הנחות: {discounts_list}"
+    - text: "ההנחות הזמינות: {discounts_list}"
+    - text: "אלו ההנחות שלנו: {discounts_list}"
+
+  utter_clarify_age_restrictions:
+    - text: "בוא אסביר בדיוק - צריך להיות {min_age} ומעלה, חובה להיות {min_age} ומעלה עם תעודה מזהה. {age_policy} 🎯"
+    - text: "אני אפרט - הכניסה מגיל {min_age}, {age_policy}. בדיקת תעודות בכניסה! 📝"
+    - text: "פשוט מאוד: {min_age} ומעלה עם תעודה מזהה. {age_policy} ℹ️"
+    - text: "הנה ההסבר המלא: {age_policy}, חובה להיות {min_age} ומעלה עם תעודה! 🪪"
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true
+
+actions:
+  - action_check_age_restrictions

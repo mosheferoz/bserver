@@ -47,68 +47,17 @@ def scrape_event_data(url):
             if img_tag:
                 image = img_tag.get('src')
         
-        print("Extracting date and description from JSON...", file=sys.stderr)
+        print("Extracting date...", file=sys.stderr)
         date_text = None
-        description = ""
-        
-        # מחפש את ה-JSON המוטמע בדף
-        scripts = soup.find_all('script')
-        for script in scripts:
-            if script.string and 'window.__NEXT_DATA__' in script.string:
-                try:
-                    # מחלץ את ה-JSON מהסקריפט
-                    json_str = script.string.split('=', 1)[1].strip()
-                    data = json.loads(json_str)
-                    
-                    # מחפש את המידע הרלוונטי ב-JSON
-                    if 'props' in data and 'pageProps' in data['props'] and 'event' in data['props']['pageProps']:
-                        event_data = data['props']['pageProps']['event']
-                        
-                        # מחלץ את התאריך
-                        if 'StartingDate' in event_data:
-                            date_text = event_data['StartingDate']
-                        
-                        # בונה את התיאור מהשדות הרלוונטיים
-                        description_parts = []
-                        
-                        if 'Adress' in event_data:
-                            description_parts.append(f"מיקום: {event_data['Adress']}")
-                        
-                        if 'MusicType' in event_data and isinstance(event_data['MusicType'], list):
-                            description_parts.append(f"סוגי מוזיקה: {', '.join(event_data['MusicType'])}")
-                        
-                        if 'EventType' in event_data:
-                            description_parts.append(f"סוג אירוע: {event_data['EventType']}")
-                        
-                        if 'MinimumAge' in event_data:
-                            description_parts.append(f"גיל מינימלי: {event_data['MinimumAge']}")
-                        
-                        # מוסיף את התיאור המלא מהדף
-                        if 'Description' in event_data:
-                            description_parts.append(event_data['Description'])
-                        
-                        description = '\n\n'.join(description_parts)
-                        break
-                except Exception as e:
-                    print(f"Error parsing JSON: {e}", file=sys.stderr)
-                    continue
-        
-        # אם לא מצאנו תיאור ב-JSON, ננסה לחפש בטקסט הרגיל
-        if not description:
-            print("Falling back to text extraction...", file=sys.stderr)
-            content_blocks = []
-            for div in soup.find_all(['div', 'p']):
-                text = div.get_text(strip=True)
-                if text and len(text) > 30 and 'expo tlv' in text.lower():
-                    content_blocks.append(text)
-            if content_blocks:
-                description = '\n\n'.join(content_blocks)
+        for element in soup.find_all(text=True):
+            if '05:30' in element or '23:30' in element:
+                date_text = element.strip()
+                break
         
         result = {
             "eventName": _cleanEventName(title),
             "imageUrl": image,
             "eventDate": date_text,
-            "description": description,
             "url": url
         }
         

@@ -1,9 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const whatsappService = require('../services/whatsapp.service');
+const whatsappGroupsService = require('../services/whatsapp-groups.service');
 const { db, admin } = require('../database/firebase');
 const logger = require('../logger');
 const authMiddleware = require('../middleware/auth');
+const rasaService = require('../services/rasa.service');
 
 // נתיבים שלא דורשים אימות
 router.get('/qr/:sessionId', async (req, res) => {
@@ -66,7 +68,13 @@ router.get('/status/:sessionId', (req, res) => {
     }
 
     logger.info(`Status request received for session ${sessionId}`);
-    res.json(whatsappService.getStatus(sessionId));
+    const isConnected = whatsappService.isConnected.get(sessionId) || false;
+    const hasQR = whatsappService.qrCodes.has(sessionId);
+    res.json({ 
+      connected: isConnected,
+      hasQR: hasQR,
+      status: isConnected ? 'CONNECTED' : (hasQR ? 'NEED_SCAN' : 'DISCONNECTED')
+    });
   } catch (error) {
     logger.error(`Error in /status route for session ${req.params.sessionId}:`, error);
     res.status(500).json({ 
@@ -155,15 +163,16 @@ router.post('/send', async (req, res) => {
       // שמירת היסטוריה אם Firebase זמין
       try {
         if (db && admin) {
-          await db.collection('message_history').add({
-            sessionId,
-            phoneNumber: cleanPhoneNumber,
-            message: finalMessage,
-            status: 'sent',
-            archived: shouldArchive,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-          });
-          logger.info('Message history saved to Firebase');
+          // מבוטל - לא שומרים היסטוריה יותר
+          // await db.collection('message_history').add({
+          //   sessionId,
+          //   phoneNumber: cleanPhoneNumber,
+          //   message: finalMessage,
+          //   status: 'sent',
+          //   archived: shouldArchive,
+          //   timestamp: admin.firestore.FieldValue.serverTimestamp()
+          // });
+          // logger.info('Message history saved to Firebase');
         }
       } catch (dbError) {
         logger.warn('Failed to save message history:', dbError);
@@ -220,53 +229,8 @@ router.post('/archive', async (req, res) => {
 
 router.post('/history', async (req, res) => {
   try {
-    // בדיקה אם Firebase זמין
-    if (!db || !admin) {
-      logger.warn('Firebase is not configured, history feature is disabled');
-      return res.status(503).json({
-        error: 'History feature is disabled',
-        details: 'Firebase is not configured'
-      });
-    }
-
-    logger.info('Received history request - Full body:', req.body);
-    logger.info('Headers:', req.headers);
-    
-    const { phoneNumber, message, status, sessionId } = req.body;
-    logger.info('Extracted fields:', { phoneNumber, message, status, sessionId });
-    
-    if (!phoneNumber || !message || !sessionId) {
-      logger.warn('Missing required fields for history:', { 
-        hasPhoneNumber: !!phoneNumber, 
-        hasMessage: !!message,
-        hasSessionId: !!sessionId,
-        body: JSON.stringify(req.body)
-      });
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        details: { 
-          hasPhoneNumber: !!phoneNumber, 
-          hasMessage: !!message,
-          hasSessionId: !!sessionId,
-          receivedFields: Object.keys(req.body),
-          fullBody: req.body
-        }
-      });
-    }
-
-    const docRef = await db.collection('message_history').add({
-      sessionId,
-      phoneNumber,
-      message,
-      status: status || 'pending',
-      timestamp: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    logger.info('History saved successfully:', { id: docRef.id });
-    res.json({ 
-      success: true,
-      id: docRef.id
-    });
+    // מבוטל - לא שומרים היסטוריה יותר
+    res.json({ success: true });
   } catch (error) {
     logger.error('Error in /history:', error);
     res.status(500).json({ 
@@ -397,6 +361,185 @@ router.get('/groups/:sessionId/:groupId', async (req, res) => {
     logger.error(`Error in /groups/:sessionId/:groupId route:`, error);
     res.status(500).json({ 
       error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// נתיבים חדשים לתמיכה ב-Rasa
+router.post('/auto-reply/enable', authMiddleware, async (req, res) => {
+  try {
+    const { sessionId, eventId, agentId } = req.body;
+    
+    if (!sessionId || !eventId || !agentId) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'Session ID, Event ID, and Agent ID are required'
+      });
+    }
+
+    // בדיקה שה-WhatsApp מחובר
+    if (!whatsappService.isConnected.get(sessionId)) {
+      return res.status(503).json({
+        error: 'WhatsApp is not connected',
+        details: 'Please connect WhatsApp first'
+      });
+    }
+
+    // הפעלת מענה אוטומטי
+    const success = await whatsappService.enableAutoReply(sessionId, eventId, agentId);
+    
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({
+        error: 'Failed to enable auto-reply',
+        details: 'Internal server error'
+      });
+    }
+  } catch (error) {
+    logger.error('Error in /auto-reply/enable:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.stack
+    });
+  }
+});
+
+router.post('/auto-reply/disable', authMiddleware, async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    
+    if (!sessionId) {
+      return res.status(400).json({
+        error: 'Missing session ID',
+        details: 'Session ID is required'
+      });
+    }
+
+    // כיבוי מענה אוטומטי
+    const success = await whatsappService.disableAutoReply(sessionId);
+    
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({
+        error: 'Failed to disable auto-reply',
+        details: 'Internal server error'
+      });
+    }
+  } catch (error) {
+    logger.error('Error in /auto-reply/disable:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.stack
+    });
+  }
+});
+
+router.get('/auto-reply/status/:sessionId', authMiddleware, (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      return res.status(400).json({
+        error: 'Missing session ID',
+        details: 'Session ID is required'
+      });
+    }
+
+    // בדיקת סטטוס מענה אוטומטי
+    const autoReplyInfo = whatsappService.autoReplyEnabled.get(sessionId);
+    
+    res.json({
+      enabled: !!autoReplyInfo,
+      eventId: autoReplyInfo?.eventId,
+      agentId: autoReplyInfo?.agentId
+    });
+  } catch (error) {
+    logger.error('Error in /auto-reply/status:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.stack
+    });
+  }
+});
+
+router.post('/rasa/train', authMiddleware, async (req, res) => {
+  try {
+    await rasaService.trainModel();
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Error training Rasa model:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.stack
+    });
+  }
+});
+
+// נתיב חדש לעדכון קבוצות
+router.post('/groups/update', authMiddleware, async (req, res) => {
+  try {
+    const { sessionId, groupUpdate } = req.body;
+    
+    logger.info('Received group update request:', { sessionId, groupUpdate });
+    
+    if (!sessionId || !groupUpdate) {
+      return res.status(400).json({
+        error: 'חסרים שדות חובה',
+        details: 'נדרש מזהה סשן ופרטי עדכון'
+      });
+    }
+
+    // בדיקה שה-WhatsApp מחובר
+    if (!whatsappService.isConnected.get(sessionId)) {
+      return res.status(503).json({
+        error: 'WhatsApp לא מחובר',
+        details: 'יש להתחבר ל-WhatsApp תחילה'
+      });
+    }
+
+    // וולידציה של פרטי העדכון
+    const validation = await whatsappGroupsService.validateGroupUpdate(groupUpdate);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        error: 'נתוני עדכון לא תקינים',
+        details: validation.errors
+      });
+    }
+
+    // קבלת הלקוח של WhatsApp
+    const client = whatsappService.clients.get(sessionId);
+    if (!client) {
+      return res.status(503).json({
+        error: 'לקוח WhatsApp לא נמצא',
+        details: 'יש להתחבר מחדש'
+      });
+    }
+
+    // ביצוע העדכון
+    const result = await whatsappGroupsService.updateGroups(client, groupUpdate);
+    
+    // אם יש עדכונים שנכשלו, ננסה שוב
+    if (result.errors && result.errors.length > 0) {
+      logger.info('מנסה שוב עדכונים שנכשלו...');
+      const retryResult = await whatsappGroupsService.retryFailedUpdates(client, result.errors);
+      
+      // מיזוג תוצאות הניסיון החוזר עם התוצאות המקוריות
+      result.results = [...result.results, ...retryResult.results];
+      result.errors = retryResult.errors;
+      result.totalUpdated += retryResult.results.length;
+      result.totalFailed = retryResult.errors.length;
+    }
+
+    logger.info('Group update completed:', result);
+    res.json(result);
+    
+  } catch (error) {
+    logger.error('Error in /groups/update:', error);
+    res.status(500).json({
+      error: 'שגיאה בעדכון הקבוצות',
       details: error.message
     });
   }

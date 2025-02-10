@@ -1,0 +1,98 @@
+version: "3.1"
+
+stories:
+
+- story: happy path event info
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_event_info
+  - action: utter_event_info
+  - intent: thank
+  - action: utter_thank
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: ask about price
+  steps:
+  - intent: ask_price
+  - action: utter_price
+  - intent: affirm
+  - action: utter_event_info
+
+- story: ask about location
+  steps:
+  - intent: ask_location
+  - action: utter_location
+  - intent: ask_date
+  - action: utter_date
+
+- story: ask about date
+  steps:
+  - intent: ask_date
+  - action: utter_date
+  - intent: ask_price
+  - action: utter_price
+
+- story: ask about contact
+  steps:
+  - intent: ask_contact
+  - action: utter_contact
+  - intent: affirm
+  - action: utter_thank
+
+- story: ask about availability
+  steps:
+  - intent: ask_availability
+  - action: utter_availability
+  - intent: deny
+  - action: utter_goodbye
+
+- story: out of scope
+  steps:
+  - intent: out_of_scope
+  - action: utter_out_of_scope
+  - intent: ask_event_info
+  - action: utter_event_info
+
+- story: multiple questions
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_event_info
+  - action: utter_event_info
+  - intent: ask_price
+  - action: utter_price
+  - intent: ask_location
+  - action: utter_location
+  - intent: thank
+  - action: utter_thank
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: ask event details
+  steps:
+  - intent: ask_event_details
+  - action: utter_event_details
+  - intent: ask_event_link
+  - action: utter_event_link
+
+- story: ask event link
+  steps:
+  - intent: ask_event_link
+  - action: utter_event_link
+  - intent: thank
+  - action: utter_thank
+
+- story: ask details and link
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_event_details
+  - action: utter_event_details
+  - intent: ask_event_link
+  - action: utter_event_link
+  - intent: thank
+  - action: utter_thank
+  - intent: goodbye
+  - action: utter_goodbye 

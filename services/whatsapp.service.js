@@ -7,6 +7,10 @@ const logger = require('../logger');
 const path = require('path');
 const { LocalAuth } = require('whatsapp-web.js');
 const csv = require('csv-parser');
+const virtualAgentService = require('./virtual-agent.service');
+const admin = require('firebase-admin');
+const rasaWhatsAppService = require('./rasa-whatsapp.service');
+const rasaService = require('./rasa.service');
 
 class WhatsAppService {
   constructor() {
@@ -15,6 +19,41 @@ class WhatsAppService {
     this.isConnected = new Map();
     this.isInitializing = new Map();
     this.authPath = path.join(__dirname, '../whatsapp-auth');
+    this.autoReplyEnabled = new Map(); // sessionId -> { eventId, agentId }
+    this.io = null;
+    this.keepAliveIntervals = new Map(); // מוסיף מעקב אחר ה-intervals
+  }
+
+  setSocketIO(io) {
+    this.io = io;
+    this.setupSocketEvents();
+  }
+
+  setupSocketEvents() {
+    if (!this.io) return;
+
+    this.io.on('connection', (socket) => {
+      logger.info(`Socket connected: ${socket.id}`);
+
+      socket.on('whatsapp:status', async (sessionId) => {
+        const isConnected = this.isConnected.get(sessionId) || false;
+        const hasQR = this.qrCodes.has(sessionId);
+        socket.emit('whatsapp:status:response', {
+          connected: isConnected,
+          hasQR: hasQR,
+          status: isConnected ? 'CONNECTED' : (hasQR ? 'NEED_SCAN' : 'DISCONNECTED')
+        });
+      });
+
+      socket.on('disconnect', () => {
+        logger.info(`Socket disconnected: ${socket.id}`);
+      });
+    });
+  }
+
+  // פונקציה לקבלת קוד QR
+  getQR(sessionId) {
+    return this.qrCodes.get(sessionId);
   }
 
   async cleanupAuthFolder(sessionId) {
@@ -27,13 +66,11 @@ class WhatsAppService {
         const client = this.clients.get(sessionId);
         if (client) {
           try {
-            // נסה לנתק בצורה מסודרת
             await client.logout().catch(err => logger.warn('Logout error:', err));
             await client.destroy().catch(err => logger.warn('Destroy error:', err));
           } catch (err) {
             logger.warn('Client cleanup error:', err);
           } finally {
-            // תמיד נקה את המשאבים
             this.clients.delete(sessionId);
             this.qrCodes.delete(sessionId);
             this.isConnected.set(sessionId, false);
@@ -47,77 +84,29 @@ class WhatsAppService {
 
       if (fs.existsSync(sessionPath)) {
         try {
-          // נסה למחוק קודם את הקבצים הבעייתיים
-          const problematicPaths = [
-            path.join(sessionPath, `session-${sessionId}`, 'Default', 'IndexedDB'),
-            path.join(sessionPath, `session-${sessionId}`, 'Default', 'Cache'),
-            path.join(sessionPath, `session-${sessionId}`, 'Default', 'Service Worker')
-          ];
-
-          for (const dirPath of problematicPaths) {
-            if (fs.existsSync(dirPath)) {
-              try {
-                // נסה למחוק עם rimraf
-                await rimraf(dirPath, { 
-                  maxRetries: 5,
-                  recursive: true,
-                  force: true,
-                  retryDelay: 1000
-                });
-              } catch (err) {
-                logger.warn(`Failed to remove directory ${dirPath}:`, err);
-                // אם נכשל, נסה למחוק קבצים בודדים
-                try {
-                  const files = fs.readdirSync(dirPath);
-                  for (const file of files) {
-                    const filePath = path.join(dirPath, file);
-                    try {
-                      if (fs.lstatSync(filePath).isDirectory()) {
-                        await rimraf(filePath, { maxRetries: 3, recursive: true, force: true });
-                      } else {
-                        fs.unlinkSync(filePath);
-                      }
-                    } catch (fileErr) {
-                      logger.warn(`Failed to remove path ${filePath}:`, fileErr);
-                    }
-                  }
-                } catch (readErr) {
-                  logger.warn(`Failed to read directory ${dirPath}:`, readErr);
-                }
-              }
-            }
-          }
-
-          // המתנה נוספת אחרי מחיקת הקבצים הבעייתיים
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
-          // עכשיו נסה למחוק את כל התיקייה
+          // מחיקת התיקייה עם rimraf
           await rimraf(sessionPath, { 
             maxRetries: 5,
             recursive: true,
-            force: true,
-            retryDelay: 1000
+            force: true
           });
           
           logger.info('Session folder removed successfully');
         } catch (err) {
           logger.error('Error removing session folder:', err);
-          // אם נכשלנו במחיקה, ננסה לפחות ליצור תיקייה נקייה
+          // אם rimraf נכשל, ננסה למחוק עם fs-extra
           try {
-            const newSessionPath = path.join(this.authPath, `session-${sessionId}-${Date.now()}`);
-            await fs.promises.mkdir(newSessionPath, { recursive: true });
-            logger.info(`Created new session folder at ${newSessionPath}`);
-            return newSessionPath;
-          } catch (mkdirErr) {
-            logger.error('Failed to create new session folder:', mkdirErr);
-            throw mkdirErr;
+            await fs.remove(sessionPath);
+            logger.info('Session folder removed with fs-extra');
+          } catch (fsErr) {
+            logger.error('Error removing session folder with fs-extra:', fsErr);
           }
         }
       }
 
       // יצירת תיקייה חדשה
       try {
-        await fs.promises.mkdir(sessionPath, { recursive: true });
+        await fs.ensureDir(sessionPath);
         logger.info('Session folder recreated');
         return sessionPath;
       } catch (mkdirErr) {
@@ -128,6 +117,12 @@ class WhatsAppService {
     } catch (error) {
       logger.error('Error in cleanupAuthFolder:', error);
       throw error;
+    } finally {
+      if (this.keepAliveIntervals.has(sessionId)) {
+        clearInterval(this.keepAliveIntervals.get(sessionId));
+        this.keepAliveIntervals.delete(sessionId);
+        logger.info(`Cleared keep-alive interval for session ${sessionId}`);
+      }
     }
   }
 
@@ -174,7 +169,13 @@ class WhatsAppService {
       client.on('ready', () => {
         this.isConnected.set(sessionId, true);
         this.qrCodes.delete(sessionId);
-        logger.info(`WhatsApp client is ready and connected for session ${sessionId}`);
+        logger.info(`WhatsApp client is ready!`);
+        if (this.io) {
+          this.io.emit('whatsapp:ready', { sessionId });
+        }
+        
+        // מוסיף בדיקת חיבור תקופתית
+        this.setupKeepAlive(sessionId, client);
       });
 
       client.on('qr', async (qr) => {
@@ -183,6 +184,9 @@ class WhatsAppService {
           const qrCode = await qrcode.toDataURL(qr);
           this.qrCodes.set(sessionId, qrCode);
           logger.info('QR code converted to data URL');
+          if (this.io) {
+            this.io.emit('whatsapp:qr', { sessionId, qr: qrCode });
+          }
         } catch (error) {
           logger.error('Error generating QR code:', error);
           this.qrCodes.delete(sessionId);
@@ -193,12 +197,18 @@ class WhatsAppService {
         this.isConnected.set(sessionId, true);
         this.qrCodes.delete(sessionId);
         logger.info(`WhatsApp client authenticated for session ${sessionId}`);
+        if (this.io) {
+          this.io.emit('whatsapp:authenticated', { sessionId });
+        }
       });
 
       client.on('auth_failure', async (err) => {
         this.isConnected.set(sessionId, false);
         this.qrCodes.delete(sessionId);
         logger.error(`WhatsApp authentication failed for session ${sessionId}:`, err);
+        if (this.io) {
+          this.io.emit('whatsapp:auth_failure', { sessionId, error: err.message });
+        }
         
         await this.cleanupAuthFolder(sessionId);
         setTimeout(() => this.initialize(sessionId), 5000);
@@ -208,6 +218,9 @@ class WhatsAppService {
         this.isConnected.set(sessionId, false);
         this.qrCodes.delete(sessionId);
         logger.error(`WhatsApp client disconnected for session ${sessionId}:`, reason);
+        if (this.io) {
+          this.io.emit('whatsapp:disconnected', { sessionId, reason });
+        }
         
         try {
           await this.cleanupAuthFolder(sessionId);
@@ -222,6 +235,119 @@ class WhatsAppService {
         }
       });
 
+      client.on('message', async (message) => {
+        try {
+          // בדיקה שהחיבור פעיל
+          if (!this.isConnected.get(sessionId)) {
+            logger.warn(`WhatsApp client is not connected for session ${sessionId}`);
+            return;
+          }
+
+          logger.info(`Received message in session ${sessionId} from ${message.from}: ${message.body}`);
+          
+          const autoReplyInfo = this.autoReplyEnabled.get(sessionId);
+          logger.info(`Auto-reply status for session ${sessionId}:`, autoReplyInfo);
+          
+          if (autoReplyInfo) {
+            logger.info(`Auto-reply is enabled for session ${sessionId} with event ${autoReplyInfo.eventId} and agent ${autoReplyInfo.agentId}`);
+            
+            // העברת ההודעה ל-Rasa וקבלת תשובה
+            const phoneNumber = message.from.split('@')[0].replace('972', '');
+            logger.info(`Sending message to Rasa for ${phoneNumber}: ${message.body}`);
+            
+            const responses = await rasaService.sendMessage(message.body, phoneNumber);
+            logger.info(`Received responses from Rasa:`, responses);
+            
+            // שליחת כל התשובות בחזרה למשתמש
+            for (const response of responses) {
+              if (response.text) {
+                // קבלת פרטי האירוע והנציג
+                const eventDetails = await this.getEventDetails(autoReplyInfo.eventId);
+                const agentDetails = await this.getAgentDetails(autoReplyInfo.agentId);
+                
+                // מחליף את המשתנים בהודעה
+                const processedMessage = response.text
+                  .replace('{agent_name}', agentDetails?.name || 'הנציג הווירטואלי')
+                  .replace('{event_name}', eventDetails?.eventName || 'האירוע')
+                  .replace('{event_date}', eventDetails?.eventDate || 'לא צוין')
+                  .replace('{event_info}', eventDetails?.eventInfo || 'אין מידע נוסף')
+                  .replace('{event_link}', eventDetails?.eventLink || 'לא צוין')
+                  .replace('{price}', eventDetails?.customFields?.price || 'לא צוין')
+                  .replace('{discount_info}', eventDetails?.customFields?.discountInfo || 'אין מידע על הנחות')
+                  // מיקום ופרטי מקום
+                  .replace('{location}', eventDetails?.customFields?.location || 'לא צוין')
+                  .replace('{venue_name}', eventDetails?.customFields?.venueName || '')
+                  .replace('{address}', eventDetails?.customFields?.address || 'לא צוין')
+                  .replace('{parking_info}', eventDetails?.customFields?.parkingInfo || 'אין מידע על חניה')
+                  .replace('{accessibility}', eventDetails?.customFields?.accessibility || 'אין מידע על נגישות')
+                  // גילאים ומגבלות
+                  .replace('{age_restriction}', eventDetails?.customFields?.ageRestriction || 'אין הגבלת גיל')
+                  .replace('{min_age}', eventDetails?.customFields?.minAge || 'לא צוין')
+                  .replace('{max_age}', eventDetails?.customFields?.maxAge || 'לא צוין')
+                  // כרטיסים ומחירים
+                  .replace('{ticket_types}', eventDetails?.customFields?.ticketTypes || 'לא צוין')
+                  .replace('{vip_price}', eventDetails?.customFields?.vipPrice || 'לא צוין')
+                  .replace('{regular_price}', eventDetails?.customFields?.regularPrice || 'לא צוין')
+                  .replace('{student_price}', eventDetails?.customFields?.studentPrice || 'לא צוין')
+                  .replace('{group_discount}', eventDetails?.customFields?.groupDiscount || 'אין הנחת קבוצות')
+                  .replace('{early_bird_price}', eventDetails?.customFields?.earlyBirdPrice || 'לא צוין')
+                  .replace('{last_minute_price}', eventDetails?.customFields?.lastMinutePrice || 'לא צוין')
+                  // זמנים
+                  .replace('{start_time}', eventDetails?.customFields?.startTime || 'לא צוין')
+                  .replace('{end_time}', eventDetails?.customFields?.endTime || 'לא צוין')
+                  .replace('{doors_open}', eventDetails?.customFields?.doorsOpen || 'לא צוין')
+                  // תוכן ומידע נוסף
+                  .replace('{performers}', eventDetails?.customFields?.performers || 'כרגע בהפתעה')
+                  .replace('{special_guests}', eventDetails?.customFields?.specialGuests || '' )
+                  .replace('{program}', eventDetails?.customFields?.program || 'אין מידע על התוכנית')
+                  .replace('{dress_code}', eventDetails?.customFields?.dressCode || 'אין קוד לבוש מיוחד')
+                  .replace('{food_drinks}', eventDetails?.customFields?.foodDrinks || 'אין מידע על אוכל ושתייה')
+                  .replace('{kosher_info}', eventDetails?.customFields?.kosherInfo || 'אין מידע על כשרות')
+                  // הנחות ומבצעים
+                  .replace('{family_discount}', eventDetails?.customFields?.familyDiscount || 'אין הנחת משפחה')
+                  .replace('{military_discount}', eventDetails?.customFields?.militaryDiscount || 'אין הנחת חיילים')
+                  .replace('{student_discount}', eventDetails?.customFields?.studentDiscount || 'אין הנחת סטודנט')
+                  .replace('{member_discount}', eventDetails?.customFields?.memberDiscount || 'אין הנחת מנוי')
+                  // פרטים טכניים
+                  .replace('{capacity}', eventDetails?.customFields?.capacity || 'לא צוין')
+                  .replace('{seating_type}', eventDetails?.customFields?.seatingType || 'לא צוין')
+                  .replace('{sound_system}', eventDetails?.customFields?.soundSystem || 'לא צוין')
+                  .replace('{stage_info}', eventDetails?.customFields?.stageInfo || 'לא צוין')
+                  // מידע ארגוני
+                  .replace('{organizer}', eventDetails?.customFields?.organizer || 'לא צוין')
+                  .replace('{contact_person}', eventDetails?.customFields?.contactPerson || 'לא צוין')
+                  .replace('{contact_phone}', eventDetails?.customFields?.contactPhone || 'לא צוין')
+                  .replace('{contact_email}', eventDetails?.customFields?.contactEmail || 'לא צוין')
+                  // תנאים והגבלות
+                  .replace('{cancellation_policy}', eventDetails?.customFields?.cancellationPolicy || 'אין מידע על מדיניות ביטולים')
+                  .replace('{refund_policy}', eventDetails?.customFields?.refundPolicy || 'אין מידע על מדיניות החזרים')
+                  .replace('{terms_conditions}', eventDetails?.customFields?.termsConditions || 'אין מידע על תנאים והגבלות')
+                  // שונות
+                  .replace('{photography_policy}', eventDetails?.customFields?.photographyPolicy || 'אין מידע על מדיניות צילום')
+                  .replace('{recording_policy}', eventDetails?.customFields?.recordingPolicy || 'אין מידע על מדיניות הקלטה')
+                  .replace('{social_media}', eventDetails?.customFields?.socialMedia || 'אין מידע על רשתות חברתיות')
+                  .replace('{hashtags}', eventDetails?.customFields?.hashtags || 'אין האשטגים')
+                  .replace('{sponsors}', eventDetails?.customFields?.sponsors || 'אין ספונסרים')
+                  .replace('{partners}', eventDetails?.customFields?.partners || 'אין שותפים');
+
+                logger.info(`Processed message for session ${sessionId}: ${processedMessage}`);
+                
+                // בדיקה נוספת שהחיבור עדיין פעיל לפני שליחת התשובה
+                if (this.isConnected.get(sessionId)) {
+                  await client.sendMessage(message.from, processedMessage);
+                } else {
+                  logger.warn(`Cannot send response - WhatsApp client is not connected for session ${sessionId}`);
+                }
+              }
+            }
+          } else {
+            logger.info(`Auto-reply is not enabled for session ${sessionId}`);
+          }
+        } catch (error) {
+          logger.error('Error handling incoming message:', error);
+        }
+      });
+
       await client.initialize();
       this.clients.set(sessionId, client);
       logger.info(`WhatsApp client initialized successfully for session ${sessionId}`);
@@ -229,6 +355,9 @@ class WhatsAppService {
       logger.error(`WhatsApp initialization error for session ${sessionId}:`, error);
       this.isConnected.set(sessionId, false);
       this.qrCodes.delete(sessionId);
+      if (this.io) {
+        this.io.emit('whatsapp:error', { sessionId, error: error.message });
+      }
       
       if (this.clients.has(sessionId)) {
         try {
@@ -248,28 +377,101 @@ class WhatsAppService {
     }
   }
 
-  getStatus(sessionId) {
-    return {
-      connected: this.isConnected.get(sessionId) || false,
-      hasQR: this.qrCodes.has(sessionId)
-    };
+  // פונקציה חדשה להגדרת מנגנון שמירת החיבור
+  setupKeepAlive(sessionId, client) {
+    // מנקה interval קודם אם קיים
+    if (this.keepAliveIntervals.has(sessionId)) {
+      clearInterval(this.keepAliveIntervals.get(sessionId));
+    }
+
+    // מגדיר בדיקה כל 5 דקות במקום 30
+    const interval = setInterval(async () => {
+      try {
+        // בדיקת מצב החיבור
+        const state = await client.getState().catch(() => null);
+        logger.debug(`Keep-alive check for session ${sessionId}: ${state}`);
+
+        if (!state || state !== 'CONNECTED' || !this.isConnected.get(sessionId)) {
+          logger.warn(`Connection issue detected for session ${sessionId}, state: ${state}`);
+          
+          try {
+            // נסיון ראשון - איפוס מצב
+            await client.resetState().catch(() => null);
+            
+            // בדיקה נוספת אחרי האיפוס
+            const newState = await client.getState().catch(() => null);
+            
+            if (newState !== 'CONNECTED') {
+              logger.warn(`Reset didn't help, trying full reinitialization for session ${sessionId}`);
+              
+              // שמירת המידע הקיים
+              const existingAutoReply = this.autoReplyEnabled.get(sessionId);
+              
+              // ניקוי מלא
+              await this.cleanupAuthFolder(sessionId);
+              
+              // אתחול מחדש
+              await this.initialize(sessionId);
+              
+              // שחזור המידע
+              if (existingAutoReply) {
+                this.autoReplyEnabled.set(sessionId, existingAutoReply);
+              }
+            } else {
+              logger.info(`Successfully restored connection for session ${sessionId}`);
+              this.isConnected.set(sessionId, true);
+            }
+          } catch (reinitError) {
+            logger.error(`Failed to reinitialize session ${sessionId}:`, reinitError);
+            
+            // במקרה של כישלון מוחלט - ננסה שוב בעוד דקה
+            setTimeout(async () => {
+              try {
+                await this.cleanupAuthFolder(sessionId);
+                await this.initialize(sessionId);
+              } catch (finalError) {
+                logger.error(`Final reinitialization attempt failed for session ${sessionId}:`, finalError);
+              }
+            }, 60000);
+          }
+        } else {
+          // אם החיבור תקין, נבצע פעולת ping קלה
+          try {
+            await client.sendPresenceAvailable();
+            logger.debug(`Keep-alive ping successful for session ${sessionId}`);
+          } catch (pingError) {
+            logger.warn(`Keep-alive ping failed for session ${sessionId}:`, pingError);
+          }
+        }
+      } catch (error) {
+        logger.error(`Keep-alive check failed for session ${sessionId}:`, error);
+      }
+    }, 5 * 60 * 1000); // בדיקה כל 5 דקות
+
+    this.keepAliveIntervals.set(sessionId, interval);
+    logger.info(`Keep-alive mechanism set up for session ${sessionId}`);
   }
 
-  getQR(sessionId) {
-    logger.debug(`getQR called for session ${sessionId}`);
-    
-    if (!this.clients.has(sessionId)) {
-      throw new Error('WhatsApp client not initialized');
-    }
-    if (!this.qrCodes.has(sessionId)) {
-      throw new Error('No QR code available yet. Please wait for QR generation.');
-    }
-    return this.qrCodes.get(sessionId);
-  }
-
-  async sendMessage(sessionId, phoneNumber, message) {
+  async getEventIdForNumber(phoneNumber) {
     try {
-      logger.info(`Starting sendMessage for session ${sessionId}:`, { phoneNumber, message });
+      const db = admin.firestore();
+      const numberDoc = await db.collection('phoneNumbers')
+                               .where('number', '==', phoneNumber)
+                               .get();
+      
+      if (!numberDoc.empty) {
+        return numberDoc.docs[0].data().eventId;
+      }
+      return null;
+    } catch (error) {
+      logger.error('Error getting event ID:', error);
+      return null;
+    }
+  }
+
+  async sendMessage(sessionId, to, message) {
+    try {
+      logger.info(`Starting sendMessage for session ${sessionId}:`, { to, message });
       
       if (!this.isConnected.get(sessionId)) {
         logger.error(`WhatsApp client is not connected for session ${sessionId}`);
@@ -281,14 +483,14 @@ class WhatsAppService {
         throw new Error('WhatsApp client not found');
       }
 
-      if (!phoneNumber || !message) {
-        logger.error('Missing required fields:', { phoneNumber, message });
+      if (!to || !message) {
+        logger.error('Missing required fields:', { to, message });
         throw new Error('Phone number and message are required');
       }
 
-      const cleanPhone = phoneNumber.replace(/[^\d+]/g, '');
+      const cleanPhone = to.replace(/[^\d+]/g, '');
       if (!cleanPhone) {
-        logger.error('Invalid phone number after cleaning:', phoneNumber);
+        logger.error('Invalid phone number after cleaning:', to);
         throw new Error('Phone number must contain digits');
       }
 
@@ -323,6 +525,15 @@ class WhatsAppService {
     }
   }
 
+  formatPhoneNumber(phoneNumber) {
+    logger.debug('Formatting phone number:', phoneNumber);
+    const formatted = phoneNumber.startsWith('+')
+      ? phoneNumber.slice(1)
+      : `972${phoneNumber.startsWith('0') ? phoneNumber.slice(1) : phoneNumber}`;
+    logger.debug('Formatted result:', formatted);
+    return formatted;
+  }
+
   async archiveChat(sessionId, chatId) {
     try {
       logger.info(`Attempting to archive chat ${chatId} for session ${sessionId}`);
@@ -349,15 +560,6 @@ class WhatsAppService {
       logger.error(`Error archiving chat ${chatId}:`, error);
       throw error;
     }
-  }
-
-  formatPhoneNumber(phoneNumber) {
-    logger.debug('Formatting phone number:', phoneNumber);
-    const formatted = phoneNumber.startsWith('+')
-      ? phoneNumber.slice(1)
-      : `972${phoneNumber.startsWith('0') ? phoneNumber.slice(1) : phoneNumber}`;
-    logger.debug('Formatted result:', formatted);
-    return formatted;
   }
 
   async processCsvFile(filePath) {
@@ -394,6 +596,14 @@ class WhatsAppService {
     });
   }
 
+  getStatus(sessionId) {
+    return {
+      connected: this.isConnected.get(sessionId) || false,
+      hasQR: this.qrCodes.has(sessionId)
+    };
+  }
+
+  // קבלת רשימת הקבוצות
   async getGroups(sessionId) {
     try {
       logger.info(`Getting groups for session ${sessionId}`);
@@ -416,11 +626,15 @@ class WhatsAppService {
         try {
           // נסיון לקבל מידע על הקבוצה
           let participantsCount = 0;
+          let groupDesc = '';
+          let createdAt = null;
           
           try {
             const metadata = await group.groupMetadata;
-            if (metadata && metadata.participants) {
-              participantsCount = metadata.participants.length;
+            if (metadata) {
+              participantsCount = metadata.participants?.length || 0;
+              groupDesc = metadata.desc || '';
+              createdAt = metadata.creation ? new Date(metadata.creation * 1000) : null;
               logger.debug(`Got ${participantsCount} participants from metadata for group ${group.name}`);
             }
           } catch (metadataError) {
@@ -440,7 +654,9 @@ class WhatsAppService {
             id: group.id._serialized,
             name: group.name || 'קבוצה ללא שם',
             participantsCount: participantsCount,
+            description: groupDesc,
             isReadOnly: group.isReadOnly || false,
+            createdAt: createdAt
           };
         } catch (error) {
           logger.error(`Error processing group ${group.name}:`, error);
@@ -448,7 +664,9 @@ class WhatsAppService {
             id: group.id._serialized,
             name: group.name || 'קבוצה ללא שם',
             participantsCount: 0,
+            description: '',
             isReadOnly: false,
+            createdAt: null
           };
         }
       }));
@@ -461,7 +679,7 @@ class WhatsAppService {
     }
   }
 
-  // פונקציה חדשה לקבלת מידע מפורט על קבוצה ספציפית
+  // קבלת פרטי קבוצה ספציפית
   async getGroupDetails(sessionId, groupId) {
     try {
       logger.info(`Getting details for group ${groupId} in session ${sessionId}`);
@@ -536,7 +754,7 @@ class WhatsAppService {
       if (participants.length === 0) {
         try {
           logger.info('Attempting to get participants through regular interface...');
-          const metadata = await client.groupMetadata(groupId);
+          const metadata = await chat.groupMetadata;
           
           if (metadata && metadata.participants) {
             participants = metadata.participants.map(p => ({
@@ -610,6 +828,241 @@ class WhatsAppService {
     } catch (error) {
       logger.error(`Error getting group details for ${groupId}:`, error);
       throw error;
+    }
+  }
+
+  async handleIncomingMessage(sessionId, message, from) {
+    try {
+      // בדיקה אם מענה אוטומטי מופעל עבור המשתמש הזה
+      const autoReplyInfo = this.autoReplyEnabled.get(sessionId);
+      if (!autoReplyInfo) {
+        logger.info(`Auto-reply is not enabled for session ${sessionId}`);
+        return;
+      }
+
+      logger.info(`Auto-reply info for session ${sessionId}:`, autoReplyInfo);
+
+      // שליחת ההודעה ל-Rasa וקבלת תשובה
+      const phoneNumber = from.split('@')[0].replace('972', '');
+      logger.info(`Sending message to Rasa for ${phoneNumber}: ${message}`);
+      
+      const responses = await rasaService.sendMessage(message, phoneNumber);
+      logger.info(`Received responses from Rasa:`, responses);
+      
+      // קבלת פרטי האירוע והנציג לפני שליחת התשובות
+      const eventDetails = await this.getEventDetails(autoReplyInfo.eventId);
+      const agentDetails = await this.getAgentDetails(autoReplyInfo.agentId);
+      
+      logger.info(`Event details:`, eventDetails);
+      logger.info(`Agent details:`, agentDetails);
+      
+      // שליחת כל התשובות בחזרה למשתמש
+      for (const response of responses) {
+        if (response.text) {
+          const formattedResponse = response.text
+            .replace('{agent_name}', agentDetails.name)
+            .replace('{event_name}', eventDetails.eventName)
+            .replace('{event_date}', eventDetails.eventDate)
+            .replace('{event_info}', eventDetails.eventInfo || '')
+            .replace('{event_link}', eventDetails.eventLink || 'לא צוין')
+            .replace('{price}', eventDetails.customFields?.price || 'לא צוין')
+            .replace('{discount_info}', eventDetails.customFields?.discountInfo || 'אין מידע על הנחות')
+            // מיקום ופרטי מקום
+            .replace('{location}', eventDetails.customFields?.location || 'לא צוין')
+            .replace('{venue_name}', eventDetails.customFields?.venueName || 'לא צוין')
+            .replace('{address}', eventDetails.customFields?.address || 'לא צוין')
+            .replace('{parking_info}', eventDetails.customFields?.parkingInfo || 'אין מידע על חניה')
+            .replace('{accessibility}', eventDetails.customFields?.accessibility || 'אין מידע על נגישות')
+            // גילאים ומגבלות
+            .replace('{age_restriction}', eventDetails.customFields?.ageRestriction || 'אין הגבלת גיל')
+            .replace('{min_age}', eventDetails.customFields?.minAge || 'לא צוין')
+            .replace('{max_age}', eventDetails.customFields?.maxAge || '')
+            // כרטיסים ומחירים
+            .replace('{ticket_types}', eventDetails.customFields?.ticketTypes || 'לא צוין')
+            .replace('{vip_price}', eventDetails.customFields?.vipPrice || 'לא צוין')
+            .replace('{regular_price}', eventDetails.customFields?.regularPrice || 'לא צוין')
+            .replace('{student_price}', eventDetails.customFields?.studentPrice || 'לא צוין')
+            .replace('{group_discount}', eventDetails.customFields?.groupDiscount || 'אין הנחת קבוצות')
+            .replace('{early_bird_price}', eventDetails.customFields?.earlyBirdPrice || 'לא צוין')
+            .replace('{last_minute_price}', eventDetails.customFields?.lastMinutePrice || 'לא צוין')
+            // זמנים
+            .replace('{start_time}', eventDetails.customFields?.startTime || 'לא צוין')
+            .replace('{end_time}', eventDetails.customFields?.endTime || 'לא צוין')
+            .replace('{doors_open}', eventDetails.customFields?.doorsOpen || 'לא צוין')
+            // תוכן ומידע נוסף
+            .replace('{performers}', eventDetails.customFields?.performers || 'לא צוין')
+            .replace('{special_guests}', eventDetails.customFields?.specialGuests || 'לא צוין')
+            .replace('{program}', eventDetails.customFields?.program || 'אין מידע על התוכנית')
+            .replace('{dress_code}', eventDetails.customFields?.dressCode || 'אין קוד לבוש מיוחד')
+            .replace('{food_drinks}', eventDetails.customFields?.foodDrinks || 'אין מידע על אוכל ושתייה')
+            .replace('{kosher_info}', eventDetails.customFields?.kosherInfo || 'אין מידע על כשרות')
+            // הנחות ומבצעים
+            .replace('{family_discount}', eventDetails.customFields?.familyDiscount || 'אין הנחת משפחה')
+            .replace('{military_discount}', eventDetails.customFields?.militaryDiscount || 'אין הנחת חיילים')
+            .replace('{senior_discount}', eventDetails.customFields?.seniorDiscount || 'אין הנחת גיל הזהב')
+            .replace('{student_discount}', eventDetails.customFields?.studentDiscount || 'אין הנחת סטודנט')
+            .replace('{member_discount}', eventDetails.customFields?.memberDiscount || 'אין הנחת מנוי')
+            // פרטים טכניים
+            .replace('{capacity}', eventDetails.customFields?.capacity || 'לא צוין')
+            .replace('{seating_type}', eventDetails.customFields?.seatingType || 'לא צוין')
+            .replace('{sound_system}', eventDetails.customFields?.soundSystem || 'לא צוין')
+            .replace('{stage_info}', eventDetails.customFields?.stageInfo || 'לא צוין')
+            // מידע ארגוני
+            .replace('{organizer}', eventDetails.customFields?.organizer || 'לא צוין')
+            .replace('{contact_person}', eventDetails.customFields?.contactPerson || 'לא צוין')
+            .replace('{contact_phone}', eventDetails.customFields?.contactPhone || 'לא צוין')
+            .replace('{contact_email}', eventDetails.customFields?.contactEmail || 'לא צוין')
+            // תנאים והגבלות
+            .replace('{cancellation_policy}', eventDetails.customFields?.cancellationPolicy || 'אין מידע על מדיניות ביטולים')
+            .replace('{refund_policy}', eventDetails.customFields?.refundPolicy || 'אין מידע על מדיניות החזרים')
+            .replace('{terms_conditions}', eventDetails.customFields?.termsConditions || 'אין מידע על תנאים והגבלות')
+            // שונות
+            .replace('{photography_policy}', eventDetails.customFields?.photographyPolicy || 'אין מידע על מדיניות צילום')
+            .replace('{recording_policy}', eventDetails.customFields?.recordingPolicy || 'אין מידע על מדיניות הקלטה')
+            .replace('{social_media}', eventDetails.customFields?.socialMedia || 'אין מידע על רשתות חברתיות')
+            .replace('{hashtags}', eventDetails.customFields?.hashtags || 'אין האשטגים')
+            .replace('{sponsors}', eventDetails.customFields?.sponsors || 'אין ספונסרים')
+            .replace('{partners}', eventDetails.customFields?.partners || 'אין שותפים');
+          
+          logger.info(`Formatted response: ${formattedResponse}`);
+          await this.sendMessage(sessionId, from, formattedResponse);
+        }
+      }
+    } catch (error) {
+      logger.error('Error handling incoming message:', error);
+    }
+  }
+
+  async enableAutoReply(sessionId, eventId, agentId) {
+    try {
+      this.autoReplyEnabled.set(sessionId, { eventId, agentId });
+      return true;
+    } catch (error) {
+      logger.error('Error enabling auto-reply:', error);
+      return false;
+    }
+  }
+
+  async disableAutoReply(sessionId) {
+    try {
+      this.autoReplyEnabled.delete(sessionId);
+      return true;
+    } catch (error) {
+      logger.error('Error disabling auto-reply:', error);
+      return false;
+    }
+  }
+
+  async getAgentDetails(agentId) {
+    try {
+      logger.info(`Getting agent details for ${agentId}`);
+      const agentRef = admin.firestore().collection('virtual_agents').doc(agentId);
+      logger.info(`Agent reference path: ${agentRef.path}`);
+      
+      const agentDoc = await agentRef.get();
+      logger.info(`Agent document exists: ${agentDoc.exists}`);
+      
+      if (agentDoc.exists) {
+        const agentData = agentDoc.data();
+        logger.info(`Found agent details:`, JSON.stringify(agentData, null, 2));
+        return agentData;
+      }
+      logger.warn(`Agent ${agentId} not found in path ${agentRef.path}`);
+      return {
+        name: 'הנציג הווירטואלי',
+        id: agentId
+      };
+    } catch (error) {
+      logger.error('Error getting agent details:', error);
+      logger.error('Error stack:', error.stack);
+      return {
+        name: 'הנציג הווירטואלי',
+        id: agentId
+      };
+    }
+  }
+
+  async getEventDetails(eventId) {
+    try {
+      logger.info(`Getting event details for ${eventId}`);
+      const eventRef = admin.firestore().collection('events').doc(eventId);
+      logger.info(`Event reference path: ${eventRef.path}`);
+      
+      const eventDoc = await eventRef.get();
+      logger.info(`Event document exists: ${eventDoc.exists}`);
+      
+      if (eventDoc.exists) {
+        const eventData = eventDoc.data();
+        logger.info(`Raw event data:`, JSON.stringify(eventData, null, 2));
+        
+        // עיבוד התאריך לפורמט מתאים בעברית
+        const eventDate = eventData.eventDate ? new Date(eventData.eventDate) : null;
+        const formattedDate = eventDate ? new Intl.DateTimeFormat('he-IL', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }).format(eventDate) : 'לא צוין';
+
+        // בניית אובייקט המידע המעובד
+        const formattedEventData = {
+          eventName: eventData.eventName || 'האירוע',
+          eventDate: formattedDate,
+          eventInfo: eventData.eventInfo || '',
+          eventLink: eventData.eventLink || '',
+          customFields: {
+            // מידע בסיסי
+            price: eventData.price || eventData.customFields?.price || 'לא צוין',
+            discountInfo: eventData.discountInfo || eventData.customFields?.discountInfo || '',
+            location: eventData.location || eventData.customFields?.location || 'לא צוין',
+            venueName: eventData.venueName || eventData.customFields?.venueName || 'לא צוין',
+            address: eventData.address || eventData.customFields?.address || 'לא צוין',
+            
+            // זמנים
+            startTime: eventData.startTime || eventData.customFields?.startTime || 'לא צוין',
+            endTime: eventData.endTime || eventData.customFields?.endTime || 'לא צוין',
+            doorsOpen: eventData.doorsOpen || eventData.customFields?.doorsOpen || 'לא צוין',
+            
+            // מידע נוסף
+            performers: eventData.performers || eventData.customFields?.performers || 'לא צוין',
+            specialGuests: eventData.specialGuests || eventData.customFields?.specialGuests || 'לא צוין',
+            program: eventData.program || eventData.customFields?.program || eventData.eventInfo || 'אין מידע על התוכנית',
+            
+            // שאר השדות נשארים כפי שהם
+            ...eventData.customFields
+          }
+        };
+        
+        logger.info(`Formatted event data:`, JSON.stringify(formattedEventData, null, 2));
+        return formattedEventData;
+      }
+      
+      logger.warn(`Event ${eventId} not found in path ${eventRef.path}`);
+      return {
+        eventName: 'האירוע',
+        eventDate: 'לא צוין',
+        eventInfo: '',
+        eventLink: '',
+        customFields: {
+          price: 'לא צוין',
+          discountInfo: ''
+        }
+      };
+    } catch (error) {
+      logger.error('Error getting event details:', error);
+      logger.error('Error stack:', error.stack);
+      return {
+        eventName: 'האירוע',
+        eventDate: 'לא צוין',
+        eventInfo: '',
+        eventLink: '',
+        customFields: {
+          price: 'לא צוין',
+          discountInfo: ''
+        }
+      };
     }
   }
 }

@@ -3,10 +3,14 @@ const logger = require('../logger');
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 דקות
-  max: 100, // מקסימום 100 בקשות לחלון זמן
+  max: 10000, // מקסימום 100 בקשות לחלון זמן
   message: 'Too many requests from this IP, please try again later',
-  onLimitReached: (req) => {
+  handler: (req, res) => {
     logger.warn(`Rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json({
+      error: 'Too many requests',
+      details: 'Please try again later'
+    });
   }
 });
 
