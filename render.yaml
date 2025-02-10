@@ -8,14 +8,40 @@ services:
       python3 -m pip install rasa
       python3 -m pip install -r requirements.txt
       cd rasa && rasa train && cd ..
-    startCommand: npm run dev
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000
+        value: "3000"
+      - key: HOST
+        value: "0.0.0.0"
       - key: PYTHONUNBUFFERED
         value: "true"
+      - key: PYTHON_VENV_PATH
+        value: "./venv"
+      - key: WHATSAPP_SESSION_PATH
+        value: "./whatsapp-auth"
+      - key: WHATSAPP_RETRY_INTERVAL
+        value: "5000"
+      - key: MAX_CONCURRENT_MESSAGES
+        value: "5"
+      - key: MESSAGE_DELAY_MS
+        value: "1000"
+      - key: LOG_LEVEL
+        value: "info"
+      - key: LOG_FILE_PATH
+        value: "./logs/app.log"
+      - key: CORS_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
     buildFilter:
       paths:
         - package.json
