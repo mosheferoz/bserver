@@ -11,12 +11,18 @@ services:
       python3 -m pip install rasa
       python3 -m pip install -r requirements.txt
       cd rasa && rasa train && cd ..
-    startCommand: npm start
+    startCommand: |
+      # התקנת Python וחבילות נדרשות בזמן ריצה
+      apt-get update && apt-get install -y python3 python3-pip
+      python3 -m pip install -r requirements.txt
+      npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
+      - key: PYTHONPATH
+        value: /opt/render/project/src
       - key: PYTHONUNBUFFERED
         value: "true"
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
