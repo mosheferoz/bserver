@@ -1,4 +1,5 @@
 services:
+  # שרת WhatsApp הראשי
   - type: web
     name: whatsapp-bulk-sender
     env: node
@@ -37,7 +38,29 @@ services:
     buildFilter:
       paths:
         - package.json
-        - requirements.txt
+        - package-lock.json
         - services/**
         - routes/**
-        - rasa/** 
+
+  # שרת Rasa
+  - type: web
+    name: rasa-server
+    env: python
+    buildCommand: |
+      python -m pip install --upgrade pip
+      python -m pip install rasa==3.0.0
+      python -m pip install -r rasa/requirements.txt
+      cd rasa && rasa train
+    startCommand: |
+      cd rasa && rasa run --enable-api --cors "*"
+    envVars:
+      - key: PORT
+        value: 5005
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PYTHONUNBUFFERED
+        value: "true"
+    buildFilter:
+      paths:
+        - rasa/**
+        - rasa/requirements.txt 
