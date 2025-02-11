@@ -7,9 +7,11 @@ services:
       apt-get install -y chromium chromium-driver
       export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       npm install
-      python3 -m pip install --upgrade pip
-      python3 -m pip install rasa
-      python3 -m pip install -r requirements.txt
+      # התקנת Python 3.10 ספציפית
+      apt-get install -y python3.10 python3.10-pip
+      python3.10 -m pip install --upgrade pip
+      python3.10 -m pip install rasa
+      python3.10 -m pip install -r requirements.txt
       cd rasa && rasa train && cd ..
     startCommand: |
       # התקנת Python וחבילות נדרשות בזמן ריצה
