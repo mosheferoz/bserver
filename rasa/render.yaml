@@ -4,15 +4,12 @@ services:
     env: python
     buildCommand: |
       apt-get update
-      apt-get install -y python3.7 python3.7-dev build-essential
-      python3.7 -m pip install --upgrade pip==20.0.2
-      python3.7 -m pip install -r requirements.txt
-      python3.7 -m spacy download en_core_web_sm
-      python3.7 -m rasa train
-    startCommand: python3.7 -m rasa run --enable-api --cors "*" --port $PORT
+      apt-get install -y python3.8 python3.8-pip
+      python3.8 -m pip install --upgrade pip
+      python3.8 -m pip install -r requirements.txt
+      rasa train
+    startCommand: rasa run --enable-api --cors "*" --port $PORT
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.7.16
       - key: PYTHONPATH
         value: /opt/render/project/src
       - key: PYTHONUNBUFFERED
