@@ -4,7 +4,7 @@
   "description": "Backend server for CRM Events system",
   "main": "server.js",
   "scripts": {
-    "build": "cd rasa && apt-get update && apt-get install -y python3-dev build-essential && pip install --upgrade pip && pip install setuptools==57.5.0 wheel==0.37.1 Cython==0.29.24 && pip install -r requirements.txt && python -m spacy download en_core_web_sm",
+    "build": "cd rasa && pip install --upgrade pip && pip install setuptools==57.5.0 wheel==0.37.1 Cython==0.29.24 && pip install -r requirements.txt && python -m spacy download en_core_web_sm",
     "train-rasa": "cd rasa && rasa train",
     "start-rasa": "cd rasa && rasa run --enable-api --cors \"*\" --port $PORT",
     "start": "npm run build && npm run train-rasa && npm run start-rasa"
