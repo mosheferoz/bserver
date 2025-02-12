@@ -4,9 +4,12 @@
   "description": "Backend server for CRM Events system",
   "main": "server.js",
   "scripts": {
-    "build": "cd rasa && sudo apt-get update && sudo apt-get install -y python3.8 python3.8-venv python3.8-pip python3.8 -m pip install --upgrade pip python3.8 -m pip install -r requirements.txt",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "npm install && python3 -m pip install -r requirements.txt",
     "train-rasa": "cd rasa && rasa train",
-    "start-rasa": "cd rasa && rasa run --enable-api --cors \"*\" --port $PORT"
+    "start-rasa": "cd rasa && rasa run --enable-api --cors \"*\"",
+    "start-rasa-actions": "cd rasa && rasa run actions"
   },
   "dependencies": {
     "axios": "^1.6.2",

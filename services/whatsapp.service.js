@@ -161,7 +161,7 @@ class WhatsAppService {
             '--disable-offline-load-stale-cache',
             '--disk-cache-size=0'
           ],
-          timeout: 120000,
+          timeout: 300000,
           waitForInitialPage: true,
         }
       });
