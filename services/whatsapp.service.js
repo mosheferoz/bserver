@@ -159,10 +159,14 @@ class WhatsAppService {
             '--disable-cache',
             '--disable-application-cache',
             '--disable-offline-load-stale-cache',
-            '--disk-cache-size=0'
+            '--disk-cache-size=0',
+            '--js-flags=--max-old-space-size=4096',
+            '--memory-pressure-off',
+            '--disable-web-security',
           ],
           timeout: 300000,
           waitForInitialPage: true,
+          protocolTimeout: 300000,
         }
       });
 
