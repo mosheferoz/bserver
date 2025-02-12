@@ -4,20 +4,24 @@ services:
     env: python
     buildCommand: |
       apt-get update
-      apt-get install -y python3-dev build-essential
-      python -m pip install --upgrade pip
+      apt-get install -y python3-dev build-essential gcc g++ gfortran libopenblas-dev liblapack-dev pkg-config
+      python -m pip install --upgrade pip==20.2
       python -m pip install setuptools==57.5.0 wheel==0.37.1 Cython==0.29.24
+      python -m pip install numpy==1.19.2
+      python -m pip install scipy==1.4.1
       python -m pip install -r requirements.txt
       python -m spacy download en_core_web_sm
       rasa train
     startCommand: rasa run --enable-api --cors "*" --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.8.0
+        value: 3.7.16
       - key: PYTHONPATH
         value: /opt/render/project/src
       - key: PYTHONUNBUFFERED
         value: "true"
+      - key: BLIS_ARCH
+        value: generic
     buildFilter:
       paths:
         - "**/*.yml"
