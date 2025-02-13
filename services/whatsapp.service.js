@@ -66,41 +66,42 @@ class WhatsAppService {
         const client = this.clients.get(sessionId);
         if (client) {
           try {
+            // קודם כל מנתקים את כל ה-listeners כדי למנוע אתחול מחדש אוטומטי
+            client.removeAllListeners('disconnected');
+            client.removeAllListeners('auth_failure');
+            
+            // מנסים להתנתק בצורה מסודרת
             await client.logout().catch(err => logger.warn('Logout error:', err));
+            // המתנה קצרה אחרי ה-logout
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // הרס הלקוח
             await client.destroy().catch(err => logger.warn('Destroy error:', err));
+            // המתנה נוספת אחרי ה-destroy
+            await new Promise(resolve => setTimeout(resolve, 2000));
           } catch (err) {
             logger.warn('Client cleanup error:', err);
           } finally {
             this.clients.delete(sessionId);
             this.qrCodes.delete(sessionId);
             this.isConnected.set(sessionId, false);
+            this.isInitializing.set(sessionId, false);
             logger.info(`Client resources cleaned for session ${sessionId}`);
           }
         }
       }
 
-      // המתנה לפני המשך הניקוי
+      // המתנה לפני מחיקת התיקייה
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       if (fs.existsSync(sessionPath)) {
         try {
-          // מחיקת התיקייה עם rimraf
-          await rimraf(sessionPath, { 
-            maxRetries: 5,
-            recursive: true,
-            force: true
-          });
-          
+          // מחיקת התיקייה עם fs-extra
+          await fs.remove(sessionPath);
           logger.info('Session folder removed successfully');
-        } catch (err) {
-          logger.error('Error removing session folder:', err);
-          // אם rimraf נכשל, ננסה למחוק עם fs-extra
-          try {
-            await fs.remove(sessionPath);
-            logger.info('Session folder removed with fs-extra');
-          } catch (fsErr) {
-            logger.error('Error removing session folder with fs-extra:', fsErr);
-          }
+        } catch (fsErr) {
+          logger.error('Error removing session folder:', fsErr);
+          throw fsErr;
         }
       }
 
