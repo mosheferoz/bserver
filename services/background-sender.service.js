@@ -23,8 +23,8 @@ class BackgroundSenderService {
 
   async startSending(data) {
     try {
-      const { numberId, number, recipients, message, delaySeconds, shouldArchive } = data;
-      logger.info(`Starting background sending for ${numberId}`);
+      const { numberId, number, recipients, message, delaySeconds, shouldArchive, whatsAppSessionId } = data;
+      logger.info(`Starting background sending for ${numberId} with WhatsApp session ID: ${whatsAppSessionId}`);
 
       // שמירת הנתונים
       this.sendingData.set(numberId, {
@@ -32,7 +32,8 @@ class BackgroundSenderService {
         recipients,
         message,
         delaySeconds,
-        shouldArchive
+        shouldArchive,
+        whatsAppSessionId
       });
 
       // אתחול סטטוס
@@ -113,7 +114,7 @@ class BackgroundSenderService {
     }
 
     try {
-      const { number, recipients, message, delaySeconds, shouldArchive } = data;
+      const { number, recipients, message, delaySeconds, shouldArchive, whatsAppSessionId } = data;
       const startIndex = status.lastSentIndex + 1;
 
       for (let i = startIndex; i < recipients.length; i++) {
@@ -128,7 +129,7 @@ class BackgroundSenderService {
           logger.info(`Sending message to ${recipient.name} (${recipient.phone})`);
           
           const success = await whatsappService.sendMessage(
-            number.whatsAppSessionId,
+            whatsAppSessionId,
             recipient.phone,
             this._processMessageTemplate(message, recipient)
           );
