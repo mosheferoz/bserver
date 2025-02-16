@@ -10,6 +10,7 @@ const morgan = require('morgan');
 const config = require('./config');
 const logger = require('./logger');
 const rateLimiter = require('./middleware/rateLimiter');
+const authenticateToken = require('./middleware/auth');
 const scraperRoutes = require('./routes/scraper.routes');
 const whatsappService = require('./services/whatsapp.service');
 const whatsappRoutes = require('./routes/whatsapp.routes');
@@ -17,6 +18,7 @@ const chatgptRoutes = require('./routes/chatgpt.routes');
 const eventsRoutes = require('./routes/events.routes');
 const virtualAgentsRoutes = require('./routes/virtual-agents.routes');
 const rasaWhatsAppService = require('./services/rasa-whatsapp.service');
+const backgroundSenderService = require('./services/background-sender.service');
 
 // יצירת אפליקציית Express
 const app = express();
@@ -34,6 +36,9 @@ const io = require('socket.io')(server, {
 
 // העברת ה-socket.io instance לשירות ה-WhatsApp
 whatsappService.setSocketIO(io);
+
+// העברת ה-socket.io instance לשירותים
+backgroundSenderService.setSocketIO(io);
 
 // Middleware
 app.use(cors({
@@ -54,6 +59,55 @@ app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/chatgpt', chatgptRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/virtual-agents', virtualAgentsRoutes);
+
+// נתיבי שליחה ברקע
+app.post('/api/background-sender/start', authenticateToken, async (req, res) => {
+  try {
+    const success = await backgroundSenderService.startSending(req.body);
+    res.json({ success });
+  } catch (error) {
+    logger.error('Error starting background sending:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/background-sender/stop', authenticateToken, async (req, res) => {
+  try {
+    const { numberId } = req.body;
+    const success = await backgroundSenderService.stopSending(numberId);
+    res.json({ success });
+  } catch (error) {
+    logger.error('Error stopping background sending:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/background-sender/reset', authenticateToken, async (req, res) => {
+  try {
+    const { numberId } = req.body;
+    const success = await backgroundSenderService.resetSendingState(numberId);
+    res.json({ success });
+  } catch (error) {
+    logger.error('Error resetting background sending state:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/background-sender/status/:numberId', authenticateToken, async (req, res) => {
+  try {
+    const { numberId } = req.params;
+    const status = backgroundSenderService.activeSenders.get(numberId) || {
+      isSending: false,
+      sentCount: 0,
+      totalCount: 0,
+      lastSentIndex: -1
+    };
+    res.json(status);
+  } catch (error) {
+    logger.error('Error getting background sending status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // נתיב בדיקת בריאות
 app.use('/api/health', (req, res) => {
