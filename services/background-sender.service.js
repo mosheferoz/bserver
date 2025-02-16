@@ -23,8 +23,28 @@ class BackgroundSenderService {
 
   async startSending(data) {
     try {
-      const { numberId, number, recipients, message, delaySeconds, shouldArchive, whatsAppSessionId } = data;
+      const { numberId, number, recipients, message, delaySeconds, shouldArchive, whatsAppSessionId, lastSentIndex, forceStartIndex } = data;
       logger.info(`Starting background sending for ${numberId} with WhatsApp session ID: ${whatsAppSessionId}`);
+
+      // בדיקת סטטוס קיים
+      const existingStatus = this.activeSenders.get(numberId);
+      
+      // קביעת האינדקס ההתחלתי
+      let startIndex = -1;
+      
+      if (forceStartIndex) {
+        // אם נדרש להתחיל מאינדקס ספציפי
+        startIndex = lastSentIndex;
+        logger.info(`Forcing start from index: ${startIndex + 1}`);
+      } else if (existingStatus && existingStatus.lastSentIndex > -1) {
+        // אם יש סטטוס קיים, נמשיך ממנו
+        startIndex = existingStatus.lastSentIndex;
+        logger.info(`Continuing from existing index: ${startIndex + 1}`);
+      } else {
+        // אם אין סטטוס קיים או דרישה ספציפית, נתחיל מההתחלה
+        startIndex = -1;
+        logger.info('Starting from beginning');
+      }
 
       // שמירת הנתונים
       this.sendingData.set(numberId, {
@@ -39,9 +59,9 @@ class BackgroundSenderService {
       // אתחול סטטוס
       const status = {
         isSending: true,
-        sentCount: 0,
+        sentCount: startIndex + 1,
         totalCount: recipients.length,
-        lastSentIndex: -1
+        lastSentIndex: startIndex
       };
       
       this.activeSenders.set(numberId, status);
