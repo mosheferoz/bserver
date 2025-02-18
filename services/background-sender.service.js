@@ -1,16 +1,13 @@
 const whatsappService = require('./whatsapp.service');
 const logger = require('../logger');
-const admin = require('firebase-admin');
 
 class BackgroundSenderService {
   constructor() {
     this.activeSenders = new Map(); // numberId -> { isSending, sentCount, totalCount, lastSentIndex }
     this.sendingData = new Map(); // numberId -> { number, recipients, message, delaySeconds, shouldArchive }
     this.sendingWorkers = new Map(); // numberId -> Worker
-    this.userWorkers = new Map(); // userId -> Set<numberId>
-    this.userPlans = new Map(); // userId -> { planId, numberLimit }
     this.io = null;
-    this.sendingQueue = []; // תור לשליחות ממתינות
+    this.workerStats = new Map(); // numberId -> { startTime, lastUpdateTime, sendRate }
   }
 
   setSocketIO(io) {
@@ -26,74 +23,14 @@ class BackgroundSenderService {
     }
   }
 
-  // פונקציה חדשה לקבלת מגבלת המספרים של המשתמש
-  async _getUserNumberLimit(userId) {
-    try {
-      // בדיקה אם יש כבר מידע בזיכרון
-      if (this.userPlans.has(userId)) {
-        return parseInt(this.userPlans.get(userId).numberLimit);
-      }
-
-      
-      // קבלת תכנית המשתמש מ-Firestore
-      const userDoc = await admin.firestore().collection('users').doc(userId).get();
-      if (!userDoc.exists) {
-        logger.warn(`User ${userId} not found`);
-        return 1; // ברירת מחדל למקרה של שגיאה
-      }
-
-      const userData = userDoc.data();
-      const planId = userData.planId ;
-
-      // קבלת פרטי התכנית
-      const planDoc = await admin.firestore().collection('plans').doc(planId).get();
-      if (!planDoc.exists) {
-        logger.warn(`Plan ${planId} not found`);
-        return 1;
-      }
-
-      const planData = planDoc.data();
-      const numberLimit = parseInt(planData.numberlimit) || 1;
-
-      // שמירה בזיכרון
-      this.userPlans.set(userId, {
-        planId,
-        numberLimit
-      });
-
-      return numberLimit;
-    } catch (error) {
-      logger.error('Error getting user number limit:', error);
-      return 1; // ברירת מחדל במקרה של שגיאה
-    }
-  }
-
-  // פונקציה חדשה לבדיקת מספר השליחות הפעילות של משתמש
-  _getUserActiveWorkers(userId) {
-    return this.userWorkers.get(userId)?.size || 0;
-  }
-
   async startSending(data) {
     try {
       const { numberId, number, recipients, message, delaySeconds, shouldArchive, whatsAppSessionId, lastSentIndex, forceStartIndex } = data;
-      const userId = number.userId;
-      
-      logger.info(`Starting background sending for ${numberId} (User: ${userId})`);
+      logger.info(`Starting background sending for ${numberId} with WhatsApp session ID: ${whatsAppSessionId}`);
 
-      // בדיקה אם כבר יש שליחה פעילה למספר זה
+      // בדיקה אם כבר יש שליחה פעילה
       if (this.sendingWorkers.has(numberId)) {
         logger.warn(`Already sending for ${numberId}`);
-        return false;
-      }
-
-      // בדיקת מגבלת המספרים של המשתמש
-      const numberLimit = await this._getUserNumberLimit(userId);
-      const currentActive = this._getUserActiveWorkers(userId);
-
-      logger.info(`User ${userId} has ${currentActive} active workers out of ${numberLimit} limit`);
-
-      if (currentActive >= numberLimit) {
-        logger.warn(`User ${userId} has reached their concurrent sending limit (${numberLimit})`);
         return false;
       }
 
@@ -116,8 +53,7 @@ class BackgroundSenderService {
         message,
         delaySeconds,
         shouldArchive,
-        whatsAppSessionId,
-        userId // הוספת userId לנתונים
+        whatsAppSessionId
       });
 
       // אתחול סטטוס
@@ -125,21 +61,18 @@ class BackgroundSenderService {
         isSending: true,
         sentCount: startIndex + 1,
         totalCount: recipients.length,
-        lastSentIndex: startIndex
+        lastSentIndex: startIndex,
+        startTime: new Date(),
+        estimatedTimeRemaining: null,
+        sendRate: 0
       };
       
       this.activeSenders.set(numberId, status);
       this._emitStatus(numberId, status);
 
-      // עדכון מעקב שליחות משתמש
-      if (!this.userWorkers.has(userId)) {
-        this.userWorkers.set(userId, new Set());
-      }
-      this.userWorkers.get(userId).add(numberId);
-
-      // התחלת worker
+      // התחלת worker חדש
       this._startWorker(numberId);
-      
+
       return true;
     } catch (error) {
       logger.error('Error starting background sending:', error);
@@ -147,16 +80,27 @@ class BackgroundSenderService {
     }
   }
 
-  async _startWorker(numberId) {
+  _startWorker(numberId) {
+    logger.info(`Starting worker for ${numberId}`);
+
     const worker = this._createSendingWorker(numberId);
     this.sendingWorkers.set(numberId, worker);
+    
+    // אתחול סטטיסטיקות
+    this.workerStats.set(numberId, {
+      startTime: Date.now(),
+      lastUpdateTime: Date.now(),
+      messagesSent: 0,
+      sendRate: 0
+    });
   }
 
   _createSendingWorker(numberId) {
     const data = this.sendingData.get(numberId);
     const status = this.activeSenders.get(numberId);
+    const stats = this.workerStats.get(numberId);
     
-    if (!data || !status) {
+    if (!data || !status || !stats) {
       logger.error(`No data or status found for ${numberId}`);
       return null;
     }
@@ -178,9 +122,10 @@ class BackgroundSenderService {
   async _processSending(numberId, worker) {
     const data = this.sendingData.get(numberId);
     const status = this.activeSenders.get(numberId);
+    const stats = this.workerStats.get(numberId);
     
-    if (!data || !status) {
-      logger.error(`No data or status found for ${numberId}`);
+    if (!data || !status || !stats) {
+      logger.error(`Missing data for ${numberId}`);
       return;
     }
 
@@ -194,6 +139,7 @@ class BackgroundSenderService {
         try {
           logger.info(`[Worker ${numberId}] Sending to ${recipient.name} (${recipient.phone})`);
           
+          const sendStartTime = Date.now();
           const success = await whatsappService.sendMessage(
             whatsAppSessionId,
             recipient.phone,
@@ -201,103 +147,73 @@ class BackgroundSenderService {
           );
 
           if (success) {
+            // עדכון סטטיסטיקות
+            stats.messagesSent++;
+            const currentTime = Date.now();
+            const timeDiff = (currentTime - stats.lastUpdateTime) / 1000; // המרה לשניות
+            if (timeDiff > 0) {
+              stats.sendRate = stats.messagesSent / timeDiff;
+            }
+            
+            // עדכון סטטוס
             status.sentCount++;
             status.lastSentIndex = i;
+            status.sendRate = stats.sendRate;
+            
+            // חישוב זמן משוער שנותר
+            const remainingMessages = recipients.length - (i + 1);
+            if (stats.sendRate > 0) {
+              status.estimatedTimeRemaining = Math.ceil(remainingMessages / stats.sendRate);
+            }
+            
             this._emitStatus(numberId, status);
             
+            // המתנה לפי ההשהיה שהוגדרה
             if (i < recipients.length - 1 && delaySeconds > 0) {
               await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
             }
           } else {
             logger.warn(`[Worker ${numberId}] Failed to send to ${recipient.phone}`);
-            // אפשרות להוסיף לוגיקת retry כאן
+            // ניסיון שליחה חוזר אחרי 5 שניות
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            i--; // חזרה לנסות שוב את אותו נמען
           }
         } catch (error) {
           logger.error(`[Worker ${numberId}] Error sending to ${recipient.phone}:`, error);
+          // המתנה קצרה במקרה של שגיאה
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
     } finally {
       if (worker.isRunning) {
         status.isSending = false;
+        status.estimatedTimeRemaining = 0;
         this._emitStatus(numberId, status);
       }
     }
   }
 
   _workerFinished(numberId) {
-    const worker = this.sendingWorkers.get(numberId);
-    if (!worker) return;
-
-    const data = this.sendingData.get(numberId);
-    if (!data) return;
-
-    const userId = data.userId;
-
-    // הסרת העובד מהרשימות
     this.sendingWorkers.delete(numberId);
-    this.userWorkers.get(userId)?.delete(numberId);
-
-    // אם אין יותר עובדים למשתמש, מחיקת הרשומה
-    if (this.userWorkers.get(userId)?.size === 0) {
-      this.userWorkers.delete(userId);
-    }
-    
-    logger.info(`Worker for ${numberId} finished. User ${userId} has ${this._getUserActiveWorkers(userId)} active workers`);
-
-    // בדיקה אם יש שליחות בתור
-    if (this.sendingQueue.length > 0) {
-      const nextNumberId = this.sendingQueue.shift();
-      const nextData = this.sendingData.get(nextNumberId);
-      
-      if (nextData) {
-        // בדיקה שהמשתמש הבא לא חרג ממגבלת השליחות שלו
-        this._getUserNumberLimit(nextData.userId).then(limit => {
-          const userActive = this._getUserActiveWorkers(nextData.userId);
-          if (userActive < limit) {
-            this._startWorker(nextNumberId);
-          } else {
-            logger.warn(`User ${nextData.userId} has reached their limit, keeping ${nextNumberId} in queue`);
-            this.sendingQueue.unshift(nextNumberId);
-          }
-        });
-      }
-    }
+    this.workerStats.delete(numberId);
+    logger.info(`Worker for ${numberId} finished`);
   }
 
   async stopSending(numberId) {
     try {
       logger.info(`Stopping background sending for ${numberId}`);
       
-      const data = this.sendingData.get(numberId);
-      if (data) {
-        const userId = data.userId;
-        
-        // הסרה מהתור אם קיים
-        const queueIndex = this.sendingQueue.indexOf(numberId);
-        if (queueIndex > -1) {
-          this.sendingQueue.splice(queueIndex, 1);
-          logger.info(`Removed ${numberId} from queue`);
-        }
+      const worker = this.sendingWorkers.get(numberId);
+      if (worker) {
+        worker.stop();
+        this.sendingWorkers.delete(numberId);
+      }
 
-        // עצירת worker אם פעיל
-        const worker = this.sendingWorkers.get(numberId);
-        if (worker) {
-          worker.stop();
-          this.sendingWorkers.delete(numberId);
-          this.userWorkers.get(userId)?.delete(numberId);
-          
-          // אם אין יותר עובדים למשתמש, מחיקת הרשומה
-          if (this.userWorkers.get(userId)?.size === 0) {
-            this.userWorkers.delete(userId);
-          }
-        }
-
-        // עדכון סטטוס
-        const status = this.activeSenders.get(numberId);
-        if (status) {
-          status.isSending = false;
-          this._emitStatus(numberId, status);
-        }
+      const status = this.activeSenders.get(numberId);
+      if (status) {
+        status.isSending = false;
+        status.estimatedTimeRemaining = null;
+        this._emitStatus(numberId, status);
       }
       
       return true;
@@ -315,12 +231,15 @@ class BackgroundSenderService {
       
       this.activeSenders.delete(numberId);
       this.sendingData.delete(numberId);
+      this.workerStats.delete(numberId);
       
       this._emitStatus(numberId, {
         isSending: false,
         sentCount: 0,
         totalCount: 0,
-        lastSentIndex: -1
+        lastSentIndex: -1,
+        estimatedTimeRemaining: null,
+        sendRate: 0
       });
       
       return true;
@@ -335,7 +254,9 @@ class BackgroundSenderService {
       isSending: false,
       sentCount: 0,
       totalCount: 0,
-      lastSentIndex: -1
+      lastSentIndex: -1,
+      estimatedTimeRemaining: null,
+      sendRate: 0
     };
   }
 
