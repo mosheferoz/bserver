@@ -66,42 +66,66 @@ class WhatsAppService {
         const client = this.clients.get(sessionId);
         if (client) {
           try {
-            // קודם כל מנתקים את כל ה-listeners כדי למנוע אתחול מחדש אוטומטי
-            client.removeAllListeners('disconnected');
-            client.removeAllListeners('auth_failure');
+            // קודם כל מסירים את כל ה-event listeners
+            client.removeAllListeners();
             
-            // מנסים להתנתק בצורה מסודרת
-            await client.logout().catch(err => logger.warn('Logout error:', err));
-            // המתנה קצרה אחרי ה-logout
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            // הרס הלקוח
-            await client.destroy().catch(err => logger.warn('Destroy error:', err));
-            // המתנה נוספת אחרי ה-destroy
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // מנסים לסגור את הדפדפן בצורה מסודרת
+            if (client.pupBrowser) {
+              try {
+                const pages = await client.pupBrowser.pages().catch(() => []);
+                for (const page of pages) {
+                  await page.close().catch(() => {});
+                }
+                await client.pupBrowser.close().catch(() => {});
+              } catch (browserError) {
+                logger.warn('Error closing browser:', browserError);
+              }
+            }
+
+            // מנסים להתנתק
+            try {
+              await client.logout().catch(() => {});
+            } catch (logoutError) {
+              logger.warn('Logout error:', logoutError);
+            }
+
+            // הרס סופי של הלקוח
+            try {
+              await client.destroy().catch(() => {});
+            } catch (destroyError) {
+              logger.warn('Destroy error:', destroyError);
+            }
+
           } catch (err) {
             logger.warn('Client cleanup error:', err);
           } finally {
+            // ניקוי מהמפות בכל מקרה
             this.clients.delete(sessionId);
             this.qrCodes.delete(sessionId);
             this.isConnected.set(sessionId, false);
             this.isInitializing.set(sessionId, false);
+            
+            // ניקוי ה-interval של ה-keepAlive
+            if (this.keepAliveIntervals.has(sessionId)) {
+              clearInterval(this.keepAliveIntervals.get(sessionId));
+              this.keepAliveIntervals.delete(sessionId);
+            }
+            
             logger.info(`Client resources cleaned for session ${sessionId}`);
           }
         }
       }
 
-      // המתנה לפני מחיקת התיקייה
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // המתנה קצרה אחרי ניקוי המשאבים
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
+      // מחיקת תיקיית האימות
       if (fs.existsSync(sessionPath)) {
         try {
-          // מחיקת התיקייה עם fs-extra
           await fs.remove(sessionPath);
           logger.info('Session folder removed successfully');
         } catch (fsErr) {
           logger.error('Error removing session folder:', fsErr);
-          throw fsErr;
         }
       }
 
@@ -118,12 +142,6 @@ class WhatsAppService {
     } catch (error) {
       logger.error('Error in cleanupAuthFolder:', error);
       throw error;
-    } finally {
-      if (this.keepAliveIntervals.has(sessionId)) {
-        clearInterval(this.keepAliveIntervals.get(sessionId));
-        this.keepAliveIntervals.delete(sessionId);
-        logger.info(`Cleared keep-alive interval for session ${sessionId}`);
-      }
     }
   }
 
@@ -137,6 +155,19 @@ class WhatsAppService {
       this.isInitializing.set(sessionId, true);
       this.isConnected.set(sessionId, false);
       logger.info(`Starting WhatsApp client initialization for session ${sessionId}...`);
+
+      // ניקוי משאבים קודמים אם קיימים
+      if (this.clients.has(sessionId)) {
+        try {
+          const existingClient = this.clients.get(sessionId);
+          if (existingClient) {
+            await existingClient.destroy().catch(err => logger.warn('Error destroying existing client:', err));
+          }
+        } catch (err) {
+          logger.warn('Error cleaning up existing client:', err);
+        }
+        this.clients.delete(sessionId);
+      }
 
       const sessionPath = await this.cleanupAuthFolder(sessionId);
       
@@ -168,7 +199,21 @@ class WhatsAppService {
           timeout: 300000,
           waitForInitialPage: true,
           protocolTimeout: 300000,
+          handleSIGINT: true,
+          handleSIGTERM: true,
+          handleSIGHUP: true,
         }
+      });
+
+      // הוספת טיפול בשגיאות ברמת הלקוח
+      client.pupPage?.on('error', async (err) => {
+        logger.error(`Puppeteer page error for session ${sessionId}:`, err);
+        await this.handlePuppeteerError(sessionId, client, err);
+      });
+
+      client.pupBrowser?.on('disconnected', async () => {
+        logger.error(`Puppeteer browser disconnected for session ${sessionId}`);
+        await this.handlePuppeteerError(sessionId, client, new Error('Browser disconnected'));
       });
 
       client.on('ready', () => {
@@ -220,23 +265,14 @@ class WhatsAppService {
       });
 
       client.on('disconnected', async (reason) => {
-        this.isConnected.set(sessionId, false);
-        this.qrCodes.delete(sessionId);
-        logger.error(`WhatsApp client disconnected for session ${sessionId}:`, reason);
-        if (this.io) {
-          this.io.emit('whatsapp:disconnected', { sessionId, reason });
-        }
-        
         try {
-          await this.cleanupAuthFolder(sessionId);
+          logger.info(`WhatsApp client disconnected for session ${sessionId}, reason: ${reason}`);
           
-          setTimeout(() => {
-            if (!this.isInitializing.get(sessionId)) {
-              this.initialize(sessionId);
-            }
-          }, 10000);
+          const isLogout = reason?.includes('LOGOUT') || reason?.includes('CONFLICT');
+          await this.handleDisconnect(sessionId, client, reason, isLogout);
+          
         } catch (error) {
-          logger.error('Error handling disconnection:', error);
+          logger.error(`Error handling disconnection for session ${sessionId}:`, error);
         }
       });
 
@@ -360,25 +396,58 @@ class WhatsAppService {
       logger.error(`WhatsApp initialization error for session ${sessionId}:`, error);
       this.isConnected.set(sessionId, false);
       this.qrCodes.delete(sessionId);
+      this.isInitializing.set(sessionId, false);
+      
       if (this.io) {
-        this.io.emit('whatsapp:error', { sessionId, error: error.message });
+        this.io.emit('whatsapp:error', { 
+          sessionId, 
+          error: 'אירעה שגיאה בהתחברות. מנסה להתחבר מחדש...'
+        });
       }
-      
-      if (this.clients.has(sessionId)) {
+
+      // ניסיון חיבור מחדש אחרי שגיאת אתחול
+      setTimeout(() => this.initialize(sessionId), 5000);
+    }
+  }
+
+  // פונקציה חדשה לטיפול בשגיאות Puppeteer
+  async handlePuppeteerError(sessionId, client, error) {
+    logger.error(`Handling Puppeteer error for session ${sessionId}:`, error);
+
+    try {
+      // ניקוי משאבים
+      if (client) {
         try {
-          const client = this.clients.get(sessionId);
-          if (client) {
-            await client.destroy();
-          }
-        } catch (destroyError) {
-          logger.error('Error destroying client:', destroyError);
+          await client.destroy().catch(err => logger.warn('Error destroying client:', err));
+        } catch (err) {
+          logger.warn('Error in client destroy:', err);
         }
-        this.clients.delete(sessionId);
       }
-      
-      setTimeout(() => this.initialize(sessionId), 15000);
-    } finally {
-      this.isInitializing.delete(sessionId);
+
+      this.clients.delete(sessionId);
+      this.qrCodes.delete(sessionId);
+      this.isConnected.set(sessionId, false);
+      this.isInitializing.set(sessionId, false);
+
+      // ניקוי תיקיית האימות
+      await this.cleanupAuthFolder(sessionId);
+
+      if (this.io) {
+        this.io.emit('whatsapp:error', {
+          sessionId,
+          error: 'אירעה שגיאה בחיבור. המערכת תנסה להתחבר מחדש...'
+        });
+      }
+
+      // ניסיון חיבור מחדש עם השהייה
+      setTimeout(() => {
+        if (!this.isInitializing.get(sessionId)) {
+          this.initialize(sessionId);
+        }
+      }, 5000);
+
+    } catch (handlingError) {
+      logger.error(`Error handling Puppeteer error for session ${sessionId}:`, handlingError);
     }
   }
 
@@ -1068,6 +1137,33 @@ class WhatsAppService {
           discountInfo: ''
         }
       };
+    }
+  }
+
+  async handleDisconnect(sessionId, client, reason, isLogout = false) {
+    try {
+      logger.info(`Handling disconnect for session ${sessionId}, reason: ${reason}, isLogout: ${isLogout}`);
+      
+      // ניקוי משאבים בצורה מסודרת
+      await this.cleanupAuthFolder(sessionId);
+      
+      // אם זה ניתוק יזום, לא מנסים להתחבר מחדש
+      if (isLogout) {
+        if (this.io) {
+          this.io.emit('whatsapp:logout', {
+            sessionId,
+            message: 'התנתקת מחשבון הווצאפ. יש להתחבר מחדש.'
+          });
+        }
+        return;
+      }
+
+      // אחרת, מנסים להתחבר מחדש
+      if (!this.isInitializing.get(sessionId)) {
+        setTimeout(() => this.initialize(sessionId), 5000);
+      }
+    } catch (error) {
+      logger.error(`Error in handleDisconnect for session ${sessionId}:`, error);
     }
   }
 }
