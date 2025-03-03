@@ -116,8 +116,8 @@ class WhatsAppService {
         }
       }
 
-      // המתנה קצרה אחרי ניקוי המשאבים
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // המתנה ארוכה יותר אחרי ניקוי המשאבים
+      await new Promise(resolve => setTimeout(resolve, 5000)); // 5 שניות
 
       // מחיקת תיקיית האימות
       if (fs.existsSync(sessionPath)) {
